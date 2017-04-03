@@ -1,0 +1,146 @@
+:root {
+  --body-color: var(--black);
+  --font-family: 'Roboto',sans-serif;
+  --body-font-size: 100%;
+  --body-font-weight: 300;
+  --body-letter-spacing: 0.02rem;
+  --body-line-height: 1.5rem;
+  --heading-font-family: 'Roboto',sans-serif;
+  --heading-font-weight: 500;
+  --heading-letter-spacing: 0rem;
+  --bold-font-weight: 500;
+
+  --button-font-family: 'Roboto',sans-serif;
+  --button-font-size: 1rem;
+  --button-line-height: 1.5rem;
+  --button-text-transform: uppercase;
+  --button-font-weight: 500;
+  --button-font-weight-light: 300;
+  --button-letter-spacing: 0.1rem;
+  --button-padding-top: 0.7rem;
+  --button-padding-right: 1.2rem;
+  --button-padding-bottom: 0.7rem;
+  --button-padding-left: 1.2rem;
+  --button-background-color: var(--white);
+  --button-border: 1px solid black;
+  --button-text-color: black;
+  --button-border-radius: 0;
+  --button-padding-y-sm: 0.2rem;
+  --button-padding-x-sm: 0.6rem;
+  --button-padding-y-md: 0.6rem;
+  --button-padding-x-md: 0.8rem;
+
+  --button-gold-background-color: var(--gold);
+  --button-gold-border: 1px solid var(--gold);
+  --button-gold-text-color: white;
+  --button-gold-border-radius: 0;
+
+  --link-color: var(--light-gold);
+  --link-hover-color: var(--gold);
+  --link-muted-color: var(--metal-gray);
+  --link-muted-hover-color: var(--dark-gray);
+
+  --c3-form-field-font-size: 0.95rem;
+  --c3-form-field-height: 2rem;
+  --c3-form-field-padding-y: .25rem;
+  --c3-form-field-padding-x: 0;
+  --c3-form-label-font-size: 0.95rem;
+  --c3-form-label-font-color: var(--gray);
+  --c3-form-label-active-font-size: 0.75rem;
+  --c3-form-label-active-font-color: var(--purplish);
+  --c3-editor-field-padding-top: .2rem;
+  --c3-editor-field-padding-bottom: .35rem;
+  --c3-editor-field-padding-right: 0;
+  --c3-editor-field-padding-left: 0;
+  --c3-select-form-field-padding-y: 0.65rem;
+  --c3-select-form-field-padding-x: 0.65rem;
+
+  --border-width: 1px;
+  --border-radius: 0;
+  --border-color: var(--darken-2);
+  --border-active-width: 2px;
+
+  --c3-field-focus-color: var(--purplish);
+
+  /* grid */
+  --gutter-width: 1rem;
+  --outer-margin: 2rem;
+  --gutter-compensation: calc((var(--gutter-width) * 0.5) * -1);
+  --half-gutter-width: calc((var(--gutter-width) * 0.5));
+  --xs-min: 30;
+  --sm-min: 42;
+  --md-min: 58;
+  --lg-min: 68;
+  --screen-xs-min: var(--xs-min)em;
+  --screen-sm-min: var(--sm-min)em;
+  --screen-md-min: var(--md-min)em;
+  --screen-lg-min: var(--lg-min)em;
+  --container-sm: calc(var(--sm-min) + var(--gutter-width));
+  --container-md: calc(var(--md-min) + var(--gutter-width));
+  --container-lg: calc(var(--lg-min) + var(--gutter-width));
+
+  /* Cool */
+  --aqua:   #7fdbff;
+  --ocean:  #3DB2C1;
+  --blue:   #0074d9;
+  --dark-blue:   #1666ab;
+  --navy:   #001f3f;
+  --teal:   #39cccc;
+  --tiffany-blue: #17c3be;
+  --dark-tiffany-blue: #11a4a0;
+  --green:  #2ecc40;
+  --olive:  #3d9970;
+  --lime:   #01ff70;
+
+  /* Warm */
+  --yellow: #ffdc00;
+  --light-yellow: #f7ebc6;
+  --orange: #ff851b;
+  --red:    #ff4136;
+  --fuchsia:#f012be;
+  --purple: #b10dc9;
+  --maroon: #85144b;
+
+  /* Gray scale */
+  --white:  #fff;
+  --light-silver: #e9e9e9;
+  --silver: #ddd;
+  --gray:   #aaa;
+  --metal-gray: #888;
+  --dark-gray: #444;
+  --black:  #111;
+
+  /* Custom */
+  --paper: #fbfbfb;
+  --purplish: #5264AE;
+  --before-midnight: #252e37;
+  --right-before-midnight: #20272e;
+  --midnight: #1c2228;
+
+  --dark-green:  #278400;
+
+  --hot-pink: #d62565;
+  --strawberry: #ff5a5f;
+
+  --light-forest: #047d4a;
+  --forest: #006b3e;
+  --dark-forest: #015e37;
+  --jade: #437264;
+
+  --light-gold: #c9b17b;
+  --gold: #a7915d;
+  --dark-gold: #7d6a3d;
+
+  --darken-1: rgba(0,0,0,.0625);
+  --darken-2: rgba(0,0,0,.125);
+  --darken-3: rgba(0,0,0,.25);
+  --darken-4: rgba(0,0,0,.5);
+
+  --lighten-1: rgba(255,255,255,.0625);
+  --lighten-2: rgba(255,255,255,.125);
+  --lighten-3: rgba(255,255,255,.25);
+  --lighten-4: rgba(255,255,255,.5);
+
+  /* forms */
+  --form-error: rgb(228, 88, 76, 0.95);
+}
