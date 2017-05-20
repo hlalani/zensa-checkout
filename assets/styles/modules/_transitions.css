@@ -1,0 +1,63 @@
+/* 3 transition-x states - default positions (i.e. transition-center means default is center) */
+.transition-left {
+  transition: 0.5s;
+  transform: translateX(-100%);
+}
+.transition-center {
+  transition: 0.5s;
+  transform: translateX(0);
+}
+.transition-right {
+  transition: 0.5s;
+  transform: translateX(100%);
+}
+
+.show-left {
+  transform: translateX(-100%);
+  opacity: 1;
+  visibility: visible;
+}
+.show-center {
+  transform: translateX(0);
+  opacity: 1;
+  visibility: visible;
+}
+.show-right {
+  transform: translateX(100%);
+  opacity: 1;
+  visibility: visible;
+}
+
+.hide-left {
+  transform: translateX(-100%);
+  opacity: 0;
+  visibility: hidden;
+}
+.hide-center {
+  transform: translateX(0);
+  opacity: 0;
+  visibility: hidden;
+}
+.hide-right {
+  transform: translateX(100%);
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* transition-y states */
+.transition-bottom {
+  transition: 0.2s;
+  transform: translateY(50%);
+}
+
+.show-up {
+  transform: translateY(0);
+  opacity: 1;
+  visibility: visible;
+}
+
+.hide-down {
+  transform: translateY(50%);
+  opacity: 0;
+  visibility: hidden;
+}

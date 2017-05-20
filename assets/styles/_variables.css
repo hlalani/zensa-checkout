@@ -2,7 +2,7 @@
   --body-color: var(--black);
   --font-family: 'Roboto',sans-serif;
   --body-font-size: 100%;
-  --body-font-weight: 300;
+  --body-font-weight: 400;
   --body-letter-spacing: 0.02rem;
   --body-line-height: 1.5rem;
   --heading-font-family: 'Roboto',sans-serif;
@@ -141,6 +141,5 @@
   --lighten-3: rgba(255,255,255,.25);
   --lighten-4: rgba(255,255,255,.5);
 
-  /* forms */
-  --form-error: rgb(228, 88, 76, 0.95);
+  --soft-red: rgb(228, 88, 76, 0.95);
 }

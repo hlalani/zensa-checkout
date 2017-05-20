@@ -1,12 +1,17 @@
 .zensa-checkout {
 
+  & .Select {
+  }
+
   & .Select-control {
     border: none;
     height: 44px;
+    line-height: 40px;
   }
 
   & .Select-menu-outer {
     border: none;
+    z-index: 5;
   }
 
   & .Select--single > .Select-control .Select-value {
@@ -24,6 +29,7 @@
 
   & .Select-input {
     height: 44px;
+    line-height: 44px;
     padding-left: 0px;
   }
 
@@ -36,6 +42,7 @@
   & .Select-option {
     padding-top: 0px;
     padding-bottom: 0px;
+    z-index: 2;
   }
 
 }

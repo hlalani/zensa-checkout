@@ -1,0 +1,16 @@
+.bg-paper { background-color: var(--paper) }
+.bg-purplish  { background-color: var(--purplish) }
+.bg-ocean  { background-color: var(--ocean) }
+.bg-dark-gray { background-color: var(--dark-gray) }
+.bg-before-midnight { background-color: var(--before-midnight) }
+.bg-right-before-midnight { background-color: var(--right-before-midnight) }
+.bg-midnight { background-color: var(--midnight) }
+.bg-jade { background-color: var(--jade) }
+.bg-hot-pink { background-color: var(--hot-pink) }
+.bg-strawberry { background-color: var(--strawberry) }
+.bg-light-gold { background-color: var(--light-gold) }
+.bg-gold { background-color: var(--gold) }
+.bg-dark-gold { background-color: var(--dark-gold) }
+.bg-light-yellow { background-color: var(--light-yellow) }
+.bg-dark-green { background-color: var(--dark-green) }
+.bg-soft-red { background-color: var(--soft-red) }

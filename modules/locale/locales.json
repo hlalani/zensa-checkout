@@ -1,0 +1,16 @@
+{
+  "en-US": {
+    "locale": "en-US",
+    "domain": "com",
+    "currency": "usd",
+    "currencySymbol": "$",
+    "countryCode": "US"
+  },
+  "en-CA": {
+    "locale": "en-CA",
+    "domain": "ca",
+    "currency": "cad",
+    "currencySymbol": "$",
+    "countryCode": "CA"
+  }
+}
