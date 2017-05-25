@@ -1,5 +1,6 @@
 // Global
 export const PAGE_LOADING_ID = 'zcoPageLoading'
+export const STRIPE_CARD_ID = 'zcoStripeCard'
 
 // Form fields
 export const EMAIL_FIELD_ID = 'zcoEmailField'
@@ -20,4 +21,6 @@ export const OUTCOME_MESSAGE_ID = 'zcoOutcomeMessage'
 export const SAME_SHIPPING_BILLING_CHECKBOX_ID = 'zcoSameBillingShippingCheckbox'
 export const ADDRESS_TOGGLE_ID = 'zcoAddressToggle'
 export const SHIPPING_METHOD_ID = 'zcoShippingMethod'
+export const PAYMENT_METHOD_FIELD_ID = 'zcoPaymentMethod'
+export const PAYMENT_TERM_FIELD_ID = 'zcoPaymentTerm'
 export const PAY_BUTTON_ID = 'zcoPayButton'

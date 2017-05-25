@@ -2,6 +2,7 @@ import React, {Component} from 'react'
 import PropTypes from 'prop-types'
 import R from 'ramda'
 import {convertToCurrency} from '../modules/global/core'
+import {SAMPLE_PACK_SKU} from '../modules/global/constants'
 import {
   requiredValidator,
   emailValidator,
@@ -9,6 +10,7 @@ import {
 import {changeState} from '../modules/state/events'
 import {getElemState} from '../modules/state/core'
 import {
+  STRIPE_CARD_ID,
   EMAIL_FIELD_ID,
   SHIPPING_ADDRESS_NAME_FIELD_ID,
   SHIPPING_ADDRESS_LINE1_FIELD_ID,
@@ -24,6 +26,8 @@ import {
   BILLING_ADDRESS_COUNTRY_FIELD_ID,
   PHONE_FIELD_ID,
   SHIPPING_METHOD_ID,
+  PAYMENT_METHOD_ID,
+  PAYMENT_TERM_FIELD_ID,
   SAME_SHIPPING_BILLING_CHECKBOX_ID,
   ADDRESS_TOGGLE_ID,
   PAY_BUTTON_ID,
@@ -33,6 +37,8 @@ import availableCountries from '../modules/locale/available-countries.json'
 import locales from '../modules/locale/locales.json'
 import {showPageLoading, hidePageLoading, showPageLoadingSuccess, hidePageLoadingSuccess} from '../modules/page-loading/core'
 import {
+  checkIsPro,
+  getCartItemsWithDetail,
   getDiscount,
   getReferralCredit,
   getSubtotal,
@@ -40,6 +46,10 @@ import {
   getShippingOptions,
   getShippingRate,
   getTotal,
+  getFullAddressFromStateValues,
+  getStateFromFullAddress$$,
+  resetAllFields,
+  getPaymentMethods,
 } from '../modules/checkout/utils'
 import {
   handleStripeOutcome,
@@ -49,72 +59,48 @@ import {
 } from '../modules/checkout/core'
 
 import Select from 'react-select'
-
-/*
-  Props:
-  {
-    prefill: [
-      {
-        [stateId]: {
-          value: 'blah',
-        }
-      }
-      ...
-    ],
-    onSuccess*: func(stripeCharge),
-    onError*: func(error),
-    currency*: 'usd',
-    amount: 9000,
-    style: {},
-    btnStyle: {},
-    className: '',
-    shippingMethods: [],
-    stripeMetadata: {
-      business_name: '',
-      couponId: '',
-      products: '',
-      quantity: '',
-      line_items: [{sku: quantity}, ...],
-    },
-    update: false, // just update billing info instead of charging
-    updateEmail: '' // only if update === true
-  }
-*/
+import Collapsible from 'react-collapsible'
+import PageLoading from './components/PageLoading'
+import CartSummary from './components/CartSummary'
 
 export default class App extends Component {
   static propTypes = {
+    ready: PropTypes.bool.isRequired, // required because of async vars; true when all async vars have been set
     rootState: PropTypes.object.isRequired,
     stripe: PropTypes.object.isRequired,
-    locale: PropTypes.object.isRequired,
+    locale: PropTypes.object.isRequired, // {locale, domain, currency, currencySymbol}
     productDetails: PropTypes.array.isRequired,
     shippingDetails: PropTypes.array.isRequired,
-    cartItems: PropTypes.object.isRequired,
+    cartItems: PropTypes.object.isRequired, // {627843518167: 1, ...}
+    track: PropTypes.object.isRequired, // Mixpanel, FB pixel
+    countryCode: PropTypes.string,
     userProfile: PropTypes.object,
+    salesTeamUserProfile: PropTypes.object,
     customer: PropTypes.object,
-    prefill: PropTypes.object,
-    coupon: PropTypes.object,
-    track: PropTypes.object,
+    prefill: PropTypes.array, // [{stateId: 'zcoEmailField', value: 'test@test.com'}, ...]
+    coupon: PropTypes.object, // {couponId, discount, applyTo, oneTimeUse, type, validUntil}
     updateBilling: PropTypes.bool,
     showCartSummary: PropTypes.bool,
     addToEmailList: PropTypes.bool,
-    isFreeSample: PropTypes.bool,
     isPos: PropTypes.bool,
     onChargeSuccess: PropTypes.func,
+    onCreateCustomerSuccess: PropTypes.func,
     btnStyle: PropTypes.object,
     btnClassName: PropTypes.string,
   }
   static defaultProps = {
+    countryCode: 'US',
     userProfile: null,
+    salesTeamUserProfile: null,
     customer: null,
-    prefill: null,
-    coupon: null,
-    track: {},
+    prefill: [],
+    coupon: {},
     updateBilling: false,
     showCartSummary: true,
     addToEmailList: true,
-    isFreeSample: false,
     isPos: false,
     onChargeSuccess: () => {},
+    onCreateCustomerSuccess: () => {},
     btnStyle: {},
     btnClassName: '',
   }
@@ -123,25 +109,13 @@ export default class App extends Component {
     super(props)
   }
 
+  checkIsFreeSample = () => {
+    const {cartItems} = this.props
+    return R.compose(R.contains(SAMPLE_PACK_SKU), R.keys)(cartItems)
+  }
   getCard = () => {
-    const defaultCardStyle = {
-      iconColor: '#666EE8',
-      color: '#31325F',
-      height: '44px',
-      lineHeight: '44px',
-      fontWeight: 300,
-      fontFamily: 'Roboto, sans-serif',
-      fontSize: '1rem',
-      '::placeholder': {
-        color: '#CFD7E0',
-      },
-    }
-
-    const {cardStyle = defaultCardStyle, stripe} = this.props
-    const elements = stripe.elements()
-
-    const card = elements.create('card', {hidePostalCode: true, style: {base: cardStyle}})
-    return card
+    const {rootState} = this.props
+    return getElemState(rootState, STRIPE_CARD_ID)
   }
   getValue = (stateId) => {
     const {rootState} = this.props
@@ -238,22 +212,77 @@ export default class App extends Component {
       shippingAddress: {
         name: this.getValue(SHIPPING_ADDRESS_NAME_FIELD_ID),
         line1: this.getValue(SHIPPING_ADDRESS_LINE1_FIELD_ID),
-        city: this.getValue(SHIPPING_ADDRESS_ZIP_FIELD_ID),
-        state: this.getValue(SHIPPING_ADDRESS_CITY_FIELD_ID),
-        zip: this.getValue(SHIPPING_ADDRESS_STATE_FIELD_ID),
+        zip: this.getValue(SHIPPING_ADDRESS_ZIP_FIELD_ID),
+        city: this.getValue(SHIPPING_ADDRESS_CITY_FIELD_ID),
+        state: this.getValue(SHIPPING_ADDRESS_STATE_FIELD_ID),
         country: this.getValue(SHIPPING_ADDRESS_COUNTRY_FIELD_ID),
       },
       billingAddress: {
         name: this.getValue(BILLING_ADDRESS_NAME_FIELD_ID),
         line1: this.getValue(BILLING_ADDRESS_LINE1_FIELD_ID),
-        city: this.getValue(BILLING_ADDRESS_ZIP_FIELD_ID),
-        state: this.getValue(BILLING_ADDRESS_CITY_FIELD_ID),
-        zip: this.getValue(BILLING_ADDRESS_STATE_FIELD_ID),
+        zip: this.getValue(BILLING_ADDRESS_ZIP_FIELD_ID),
+        city: this.getValue(BILLING_ADDRESS_CITY_FIELD_ID),
+        state: this.getValue(BILLING_ADDRESS_STATE_FIELD_ID),
         country: this.getValue(BILLING_ADDRESS_COUNTRY_FIELD_ID),
       },
       phone: this.getValue(PHONE_FIELD_ID),
       shippingMethod: this.getValue(SHIPPING_METHOD_ID),
+      paymentMethod: this.getValue(PAYMENT_METHOD_ID),
+      paymentTerm: this.getValue(PAYMENT_TERM_FIELD_ID),
     }
+  }
+  lookUpState = (stateId) => {
+    /**
+     * Handles getting the state from Google based on full address
+     * Only runs under these conditions:
+     *    1) On blur (or change for Select) of any address related fields
+     *    2) Only if all address related fields are filled out
+     * NOTE: this needs to run on blur/select-change instead of button click
+     *       because sales tax calculation will later require stateCode
+     */
+
+    const {rootState} = this.props
+
+    // Strip out the name and add country from billing and shipping states for the state lookup
+    const billingAddressStateIds = R.compose(R.append(BILLING_ADDRESS_COUNTRY_FIELD_ID), R.without(BILLING_ADDRESS_NAME_FIELD_ID))(this.getBillingStateIds())
+    const shippingAddressStateIds = R.compose(R.append(SHIPPING_ADDRESS_COUNTRY_FIELD_ID), R.without(SHIPPING_ADDRESS_NAME_FIELD_ID))(this.getShippingStateIds())
+    const isBillingAddressField = R.contains(stateId, billingAddressStateIds)
+    const isShippingAddressField = R.contains(stateId, shippingAddressStateIds)
+
+    // #1: If not billing or shipping related field, return
+    if (!(isBillingAddressField || isShippingAddressField)) { return }
+
+    // #2: If all address related fields are not filled out (and valid), return
+    const checkFieldsFilledOut = R.compose(R.not, R.contains(false), R.map(stateId => {
+      const value = this.getValue(stateId)
+      const valid = this.getFieldValid(stateId)
+      return !(R.isNil(value) || R.isEmpty(value)) && valid
+    }))
+    const allAddressFieldFilledOut = isBillingAddressField ? checkFieldsFilledOut(billingAddressStateIds) : checkFieldsFilledOut(shippingAddressStateIds)
+    if (!allAddressFieldFilledOut) { return }
+
+    const getStateValues = R.map(R.compose(R.prop('value'), getElemState(rootState)))
+    // getAdjustedStateValues will change countryCode to countryName (necessary for Google look up)
+    const getAdjustedStateValues = (addressStateIds, countryStateId) => R.compose(R.append(this.getLabel(countryStateId)), getStateValues)(R.without(countryStateId, addressStateIds))
+    const addressStateValues = isBillingAddressField ? getAdjustedStateValues(billingAddressStateIds, BILLING_ADDRESS_COUNTRY_FIELD_ID) : getAdjustedStateValues(shippingAddressStateIds, SHIPPING_ADDRESS_COUNTRY_FIELD_ID)
+    const fullAddress = getFullAddressFromStateValues(addressStateValues)
+    getStateFromFullAddress$$(fullAddress).subscribe(
+      state => {
+        if (isBillingAddressField) {
+          changeState(BILLING_ADDRESS_STATE_FIELD_ID, {value: state, valid: true})
+        } else {
+          changeState(SHIPPING_ADDRESS_STATE_FIELD_ID, {value: state, valid: true})
+        }
+      },
+      err => {
+        console.log('Something went wrong while getting state from Google: ', err)
+        if (isBillingAddressField) {
+          changeState(BILLING_ADDRESS_STATE_FIELD_ID, {value: null, valid: true})
+        } else {
+          changeState(SHIPPING_ADDRESS_STATE_FIELD_ID, {value: null, valid: true})
+        }
+      }
+    )
   }
 
   handleBlur = (e, stateId) => {
@@ -266,6 +295,9 @@ export default class App extends Component {
 
     // console.log('On field blur', {value, valid, error, touched})
     changeState(stateId, {value, valid, error, touched})
+
+    // Look up state
+    this.lookUpState(stateId)
   }
   handleChange = (e, stateId) => {
     const value = e.target.value
@@ -275,11 +307,14 @@ export default class App extends Component {
 
     changeState(stateId, {value})
   }
-  handleSelectChange = (value, stateId) => {
-    changeState(stateId, {value})
-
+  handleSelectChange = (value, label, stateId) => {
     // Get rid of error message on any input change
     changeState(OUTCOME_MESSAGE_ID, {visible: false})
+
+    changeState(stateId, {value, label})
+
+    // Look up state
+    this.lookUpState(stateId)
   }
   handleCheckboxChange = (e) => {
     const value = e.target.checked
@@ -297,10 +332,10 @@ export default class App extends Component {
     e.preventDefault()
 
     // disable the button and show pageloading
-    changeState(PAY_BUTTON_ID, {disabled: false})
+    changeState(PAY_BUTTON_ID, {disabled: true})
     showPageLoading()
 
-    const {rootState, stripe, currency, track} = this.props
+    const {rootState, stripe, currency, track, userProfile, customer, updateBilling} = this.props
     const card = this.getCard()
 
     // Field validation
@@ -324,17 +359,46 @@ export default class App extends Component {
 
       return
     }
-
     console.log('No field validation errors')
-    const formData = this.getFormData()
 
-    // track checkout button click
-    track.checkout()
-
-    // show page loading
+    // Show page loading
     showPageLoading()
 
-    // create customer and charge
+    // Track checkout button click
+    track.checkout()
+
+    /**
+     * Create customer and charge based on checkout type.
+     * Checkout types:
+     *    1) Update billing (updateBilling())
+     *    2) Retail (charge())
+     *    3) Pro (charge())
+     *    4) Pro existing (chargeExistingPro())
+     */
+    const formData = this.getFormData()
+    // console.log('formData', formData)
+
+    if (updateBilling) {
+      // #1 update billing
+      updateBilling(this.props, formData, card)
+    } else {
+      // create customer and charge
+      const isPro = checkIsPro(this.props)
+      const isExistingCustomer = !R.isNil(customer)
+      if (!isPro) {
+        // #2 Retail
+        charge(this.props, formData, card)
+      } else {
+        // Pro
+        if (!isExistingCustomer) {
+          // #3 Pro
+          charge(this.props, formData, card)
+        } else {
+          // #4 Pro existing
+          chargeExistingPro(this.props, formData)
+        }
+      }
+    }
   }
   handleSubmitError = (err) => {
     console.log('Something went wrong while processing payment: ', err)
@@ -344,9 +408,42 @@ export default class App extends Component {
     changeState(OUTCOME_MESSAGE_ID, {msg: getErrorText(), type: 'error', visible: true})
   }
 
+  // Handle async initializations here
+  componentDidUpdate(prevProps) {
+    const {ready, userProfile, shippingDetails, countryCode} = this.props
+
+    // Initialize async states when ready goes from false to true
+    if (!prevProps.ready && ready) {
+      const shippingOptions = getShippingOptions(this.props)
+
+      // Initialize shippingMethod
+      changeState(SHIPPING_METHOD_ID, {value: R.path([0, 'name'], shippingOptions)})
+
+      // Initialize country
+      changeState(SHIPPING_ADDRESS_COUNTRY_FIELD_ID, {value: countryCode, label: R.prop(countryCode, availableCountries)})
+      changeState(BILLING_ADDRESS_COUNTRY_FIELD_ID, {value: countryCode, label: R.prop(countryCode, availableCountries)})
+    }
+  }
   componentDidMount() {
+    // Create Stripe Card Element and save on state
+    const defaultCardStyle = {
+      iconColor: '#666EE8',
+      color: '#31325F',
+      height: '44px',
+      lineHeight: '44px',
+      fontWeight: 300,
+      fontFamily: 'Roboto, sans-serif',
+      fontSize: '1rem',
+      '::placeholder': {
+        color: '#CFD7E0',
+      },
+    }
+    const {cardStyle = defaultCardStyle, stripe} = this.props
+    const elements = stripe.elements()
+    const card = elements.create('card', {hidePostalCode: true, style: {base: cardStyle}})
+    changeState(STRIPE_CARD_ID, card)
+
     // Attach Stripe Card Element
-    const card = this.getCard()
     card.mount('#card-element')
     card.on('change', e => {
       // Get rid of error message on any input change
@@ -356,32 +453,42 @@ export default class App extends Component {
     })
 
     // Initialize states
-    const {countryCode = 'US', shippingMethods} = this.props
+    const {countryCode} = this.props
     changeState(SHIPPING_ADDRESS_COUNTRY_FIELD_ID, {value: countryCode})
     changeState(BILLING_ADDRESS_COUNTRY_FIELD_ID, {value: countryCode})
     changeState(SAME_SHIPPING_BILLING_CHECKBOX_ID, {value: true})
     changeState(ADDRESS_TOGGLE_ID, {value: 'shipping'})
-    changeState(SHIPPING_METHOD_ID, {value: R.path([0, 'name'], shippingMethods)})
+    changeState(PAYMENT_METHOD_ID, {value: 'cc'})
+    changeState(PAYMENT_TERM_FIELD_ID, {value: 0})
+
+    // Prefill fields with given values and set it to valid+touched (i.e. assume all prefill values are valid)
+    const {prefill} = this.props
+    R.forEach(({stateId, value}) => {
+      changeState(stateId, {value, valid: true, touched: true})
+    })(prefill)
 
     // Initialize labels and error messages (for required validator only since by default it'll be empty)
     changeState(EMAIL_FIELD_ID, {label: 'Email', error: 'Please fill out the email'})
     changeState(SHIPPING_ADDRESS_NAME_FIELD_ID, {label: 'Name', error: 'Please fill out the name'})
     changeState(SHIPPING_ADDRESS_LINE1_FIELD_ID, {label: 'Address', error: 'Please fill out the street address'})
-    changeState(SHIPPING_ADDRESS_ZIP_FIELD_ID, {label: '', error: 'Please fill out the postcode'})
-    changeState(SHIPPING_ADDRESS_CITY_FIELD_ID, {label: '', error: 'Please fill out the city'})
-    changeState(SHIPPING_ADDRESS_COUNTRY_FIELD_ID, {label: '', error: 'Please fill out the country'})
+    changeState(SHIPPING_ADDRESS_ZIP_FIELD_ID, {error: 'Please fill out the postcode'})
+    changeState(SHIPPING_ADDRESS_CITY_FIELD_ID, {error: 'Please fill out the city'})
+    changeState(SHIPPING_ADDRESS_COUNTRY_FIELD_ID, {error: 'Please fill out the country'})
     changeState(BILLING_ADDRESS_NAME_FIELD_ID, {label: 'Address', error: 'Please fill out the name'})
-    changeState(BILLING_ADDRESS_LINE1_FIELD_ID, {label: '', error: 'Please fill out the street address'})
-    changeState(BILLING_ADDRESS_ZIP_FIELD_ID, {label: '', error: 'Please fill out the postcode'})
-    changeState(BILLING_ADDRESS_CITY_FIELD_ID, {label: '', error: 'Please fill out the city'})
-    changeState(BILLING_ADDRESS_COUNTRY_FIELD_ID, {label: '', error: 'Please fill out the country'})
+    changeState(BILLING_ADDRESS_LINE1_FIELD_ID, {error: 'Please fill out the street address'})
+    changeState(BILLING_ADDRESS_ZIP_FIELD_ID, {error: 'Please fill out the postcode'})
+    changeState(BILLING_ADDRESS_CITY_FIELD_ID, {error: 'Please fill out the city'})
+    changeState(BILLING_ADDRESS_COUNTRY_FIELD_ID, {error: 'Please fill out the country'})
     changeState(PHONE_FIELD_ID, {label: 'Phone', error: 'Please fill out the phone'})
     changeState(SHIPPING_METHOD_ID, {label: 'Shipping'})
+    changeState(PAYMENT_TERM_FIELD_ID, {label: 'Pay Term', error: 'Please fill out the payment term'})
   }
 
   render() {
-    const {rootState, locale, userProfile, shippingDetails, btnStyle = {}, btnClassName = ''} = this.props
+    const {rootState, locale, userProfile, shippingDetails, countryCode, isPos, btnStyle = {}, btnClassName = ''} = this.props
     const {currency, currencySymbol} = locale
+    const isPro = checkIsPro(this.props)
+    const isFreeSample = this.checkIsFreeSample()
     const countryList = this.getCountryList()
     const shippingCountryCode = this.getValue(SHIPPING_ADDRESS_COUNTRY_FIELD_ID)
     const billingCountryCode = this.getValue(BILLING_ADDRESS_COUNTRY_FIELD_ID)
@@ -390,9 +497,13 @@ export default class App extends Component {
     const outcomeMessage = R.prop('msg', getElemState(rootState, OUTCOME_MESSAGE_ID))
     const sameShippingBillingChecked = this.getValue(SAME_SHIPPING_BILLING_CHECKBOX_ID)
     const addressToggleState = this.getValue(ADDRESS_TOGGLE_ID)
-    const shippingOptions = getShippingOptions(userProfile, shippingDetails)
+    const shippingOptions = getShippingOptions(this.props)
+    const shippingMethod = this.getValue(SHIPPING_METHOD_ID)
+    const paymentMethods = getPaymentMethods()
+    const paymentMethod = this.getValue(PAYMENT_METHOD_ID)
 
-    const total = getTotal(this.props, )
+    const formData = this.getFormData()
+    const total = getTotal(this.props, formData)
 
     const emailLabel = this.getLabel(EMAIL_FIELD_ID)
     const shippingNameLabel = this.getLabel(SHIPPING_ADDRESS_NAME_FIELD_ID)
@@ -401,14 +512,62 @@ export default class App extends Component {
     const billingAddressLine1Label = this.getLabel(BILLING_ADDRESS_LINE1_FIELD_ID)
     const phoneLabel = this.getLabel(PHONE_FIELD_ID)
     const shippingMethodLabel = this.getLabel(SHIPPING_METHOD_ID)
+    const paymentTermLabel = this.getLabel(PAYMENT_TERM_FIELD_ID)
+
+    // For cart summary
+    const cartItemsWithDetail = getCartItemsWithDetail(this.props)
+    const subtotal = getSubtotal(this.props)
+    const discount = getDiscount(this.props)
+    const subtotalAfterDiscount = subtotal - discount
+    const referralCredit = getReferralCredit(this.props, subtotalAfterDiscount)
+    const shippingRate = getShippingRate(this.props, shippingMethod)
+    console.log('shippingRate', shippingRate)
+    const salesTax = getSalesTax(formData, subtotal, shippingRate)
+
+    /**
+     * If isPos is true, then:
+     *    1) Show payment method
+     *    2) Show payment term
+     */
+
+    /**
+     * If isFreeSample is true (this means it's also isPos is true since web samples
+     * are dealt in pro signup flow), then:
+     *    1) Hide shipping/billing toggle checkbox (since billing is not required)
+     *    2) Hide payment method
+     *    3) Hide payment term
+     *    4) Hide payment details (cc)
+     */
 
     return (
       <div className="zensa-checkout" style={{textAlign: 'left', justifyContent: 'start'}}>
+        {/* page loading */}
+        <PageLoading rootState={rootState} />
+        {/* end: page loading */}
+
         {/* outcome notification */}
         <div className={`fixed rounded h5 ${outcomeMessageType === 'error' ? 'bg-soft-red' : 'bg-dark-green'} white center transition-bottom z3 ${outcomeMessageVisible ? 'show-up' : 'hide-down'}`} style={{top: '0.5rem', left: '0.5rem', right: '0.5rem', padding: '0.3rem 0.5rem'}}>
           {outcomeMessage}
         </div>
         {/* end: outcome notification */}
+
+        {/* cart summary */}
+        <Collapsible
+          trigger="See Cart Summary"
+          transitionTime={200}
+        >
+          <CartSummary
+            locale={locale}
+            cartItemsWithDetail={cartItemsWithDetail}
+            subtotal={subtotal}
+            discount={discount}
+            referralCredit={referralCredit}
+            salesTax={salesTax}
+            shippingRate={shippingRate}
+            total={total}
+          />
+        </Collapsible>
+        {/* end: cart summary */}
 
         <form className="form" onSubmit={this.handleSubmit} noValidate>
 
@@ -421,6 +580,7 @@ export default class App extends Component {
                     id={EMAIL_FIELD_ID}
                     onChange={e => this.handleChange(e, EMAIL_FIELD_ID)}
                     onBlur={e => this.handleBlur(e, EMAIL_FIELD_ID)}
+                    value={this.getValue(EMAIL_FIELD_ID)}
                     name="email"
                     autoComplete="home email"
                     className={`form-field ${this.getFieldValid(EMAIL_FIELD_ID) || !this.getFieldTouched(EMAIL_FIELD_ID) ? '' : 'form-field-error'}`}
@@ -433,7 +593,8 @@ export default class App extends Component {
           </div>
 
           {/* same shipping and billing info checkbox */}
-          <div style={{marginBottom: '5px', marginTop: '-8px', fontSize: '0.8rem', color: 'rgba(0,0,0,0.25)', display: `${sameShippingBillingChecked ? 'block' : 'none'}`}}>
+          {/* Hide if isFreeSample or sameShippingBillingChecked */}
+          <div className={`${isFreeSample || !sameShippingBillingChecked ? 'display-none' : ''}`} style={{marginBottom: '5px', marginTop: '-8px', fontSize: '0.8rem', color: 'rgba(0,0,0,0.25)'}}>
             <input
               type="checkbox"
               value={this.getValue(SAME_SHIPPING_BILLING_CHECKBOX_ID)}
@@ -445,7 +606,7 @@ export default class App extends Component {
           {/* end: same shipping and billing info checkbox */}
 
           {/* shipping and billing toggle */}
-          <div style={{display: `${sameShippingBillingChecked ? 'none' : 'block'}`}}>
+          <div className={`${isFreeSample || sameShippingBillingChecked ? 'display-none' : ''}`}>
             <div className="row">
               <div className="col-xs-6" style={{paddingRight: '0px'}}>
                 <div onClick={e => this.handleAddressToggleClick('shipping')} className={`shipping-billing-toggle shipping-billing-toggle-left ${addressToggleState === 'shipping' ? 'toggleSelected' : ''}`}>Shipping</div>
@@ -537,17 +698,8 @@ export default class App extends Component {
                         value={shippingCountryCode}
                         options={countryList}
                         clearable={false}
-                        onChange={val => this.handleSelectChange(val, SHIPPING_ADDRESS_COUNTRY_FIELD_ID)}
+                        onChange={val => this.handleSelectChange(val.value, val.label, SHIPPING_ADDRESS_COUNTRY_FIELD_ID)}
                       />
-
-                      {/*<input
-                        id={SHIPPING_ADDRESS_COUNTRY_FIELD_ID}
-                        onBlur={e => this.handleBlur(e, SHIPPING_ADDRESS_COUNTRY_FIELD_ID)}
-                        name="address-country"
-                        className="form-field"
-                        placeholder="Country"
-                        type="text"
-                      />*/}
                       </div>
                   </div>
                 </div>
@@ -633,17 +785,8 @@ export default class App extends Component {
                         value={shippingCountryCode}
                         options={countryList}
                         clearable={false}
-                        onChange={val => this.handleSelectChange(val, BILLING_ADDRESS_COUNTRY_FIELD_ID)}
+                        onChange={val => this.handleSelectChange(val.value, val.label, BILLING_ADDRESS_COUNTRY_FIELD_ID)}
                       />
-
-                      {/*<input
-                        id={BILLING_ADDRESS_COUNTRY_FIELD_ID}
-                        onBlur={e => this.handleBlur(e, BILLING_ADDRESS_COUNTRY_FIELD_ID)}
-                        name="address-country"
-                        className="form-field"
-                        placeholder="Country"
-                        type="text"
-                      />*/}
                       </div>
                   </div>
                 </div>
@@ -678,8 +821,8 @@ export default class App extends Component {
           <div className="form-group">
             {shippingOptions.map((method, i) => {
               const {title, name, deliverySpeed, price} = method
-              const localPrice = R.prop(currency, price)
-              const displayedPrice = localPrice === 0 ? 'Free' : convertToCurrency('', localPrice)
+              const localPrice = isPro ? getShippingRate(this.props, name) : R.prop(currency, price)
+              const displayedPrice = localPrice === 0 ? 'Free' : `${convertToCurrency('', localPrice)}`
 
               return (
                 <div className="label label-lg" key={i}>
@@ -689,14 +832,14 @@ export default class App extends Component {
                       <div className="flex items-center justify-start" style={{height: '60px'}}>
                         <input
                           type="radio"
-                          name="shippingMethods"
+                          name="shippingOptions"
                           value={name}
                           checked={this.getValue(SHIPPING_METHOD_ID) === name}
                           onChange={e => this.handleRadioButtonChange(e, SHIPPING_METHOD_ID)}
                           className={`form-field`}
                           style={{width: '24px', marginLeft: '-2px', flexShrink: '0', cursor: 'pointer'}}
                         />
-                        <div style={{fontSize: '0.8rem', lineHeight: '1.2rem', color: '#222', fontWeight: '300', cursor: 'pointer'}}>
+                        <div style={{fontSize: '0.8rem', lineHeight: '1.2rem', color: '#222', fontWeight: '300'}}>
                           <div>{title} ({displayedPrice})</div>
                           <div style={{opacity: '0.4'}}>{deliverySpeed}</div>
                         </div>
@@ -709,16 +852,59 @@ export default class App extends Component {
           </div>
           {/* end: shipping methods */}
 
-          <div className="form-group">
+          {/* payment method */}
+          <div className={`form-group ${isFreeSample ? 'display-none' : ''}`}>
             <div className="label">
+              <div className="row">
+                <span className="col-xs-3">Pay Method</span>
+                <div className="col-xs-9">
+                  <Select
+                    name="payment-method"
+                    className="form-field"
+                    value={paymentMethod}
+                    options={paymentMethods}
+                    clearable={false}
+                    onChange={val => this.handleSelectChange(val.value, val.label, PAYMENT_METHOD_ID)}
+                  />
+                  </div>
+              </div>
+            </div>
+          </div>
+          {/* end payment method */}
+
+          {/* card + payment term */}
+          <div className="form-group">
+            <div className={`label ${isFreeSample || paymentMethod === 'manual' ? 'display-none' : ''}`}>
+              <div className="row">
+                <span className="col-xs-3">{paymentTermLabel}</span>
+                <div className="col-xs-9">
+                  <input
+                    id={PAYMENT_TERM_FIELD_ID}
+                    value={this.getValue(PAYMENT_TERM_FIELD_ID)}
+                    onChange={e => this.handleChange(e, PAYMENT_TERM_FIELD_ID)}
+                    onBlur={e => this.handleBlur(e, PAYMENT_TERM_FIELD_ID)}
+                    name="payment-term"
+                    className={`form-field ${this.getFieldValid(PAYMENT_TERM_FIELD_ID) || !this.getFieldTouched(PAYMENT_TERM_FIELD_ID) ? '' : 'form-field-error'}`}
+                    placeholder="0"
+                    type="number"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Hide card if isFreeSample or paymentMethod is manual */}
+            <div className={`label ${isFreeSample || paymentMethod === 'manual' ? 'display-none' : ''}`}>
               <div className="row">
                 <span className="col-xs-3">Card</span>
                 <span className="col-xs-9"><div id="card-element" className="form-field"></div></span>
               </div>
             </div>
           </div>
+          {/* end: card + payment term */}
 
-          <button className={`form-btn mb2 ${btnClassName}`} type="submit" style={btnStyle}>Pay {currencySymbol}{convertToCurrency(currencySymbol, total)}</button>
+          <button className={`form-btn mb2 ${btnClassName}`} type="submit" style={btnStyle}>
+            Pay {currencySymbol}{convertToCurrency(currencySymbol, total)} <span className="h5">({R.compose(R.toUpper, R.last, R.split('-'), R.prop('locale'))(locale)}D)</span>
+          </button>
         </form>
       </div>
     )

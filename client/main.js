@@ -40,9 +40,75 @@ getShippingDetails$.subscribe(shippingDetails => changeState('shippingDetailsDem
 getProductDetails$.subscribe(productDetails => changeState('productDetailsDemoState', productDetails))
 
 const stripeInstance = window.Stripe('pk_test_dzjZAkQ63whoQXIxplDnt77W')
-const locale = R.prop('en-US', localeObj)
+const countryCode = 'CA'
+const locale = R.prop('en-CA', localeObj)
 const cartItems = {
   [NUMBING_CREAM_30G_SKU]: 2,
+}
+const track = {
+  checkout: () => {},
+  purchase: () => {},
+  professionalPurchase: () => {},
+  professionalAddBilling: () => {},
+}
+const prefill = [
+  {
+    stateId: 'zcoEmailField',
+    value: 'seunggs@gmail.com',
+  },
+  {
+    stateId: 'zcoShippingAddressNameField',
+    value: 'Seungchan Lee',
+  },
+  {
+    stateId: 'zcoShippingAddressLine1Field',
+    value: '1415 - 938 Smithe St',
+  },
+  {
+    stateId: 'zcoShippingAddressZipField',
+    value: 'V6Z3H8',
+  },
+  {
+    stateId: 'zcoShippingAddressCityField',
+    value: 'Vancouver',
+  },
+  {
+    stateId: 'zcoPhoneField',
+    value: '123-456-7890',
+  },
+]
+const userProfile = {
+    "clientID": "YCewZfQ0fiqugGpryyFTU7j4wAQINLHV",
+    "created_at": "2017-03-21T04:40:26.655Z",
+    "email": "seunggs@gmail.com",
+    "email_verified": false,
+    "global_client_id": "O1UK79hM5rTdRGzLWdBIBoN1tC6orwoU",
+    "id": "9ef46b3d-32a3-4e5e-8262-745b1268cd1f",
+    "identities": [{
+        "connection": "Username-Password-Authentication",
+        "isSocial": false,
+        "provider": "auth0",
+        "user_id": "58d0aeba6983e422876e9eb5"
+    }],
+    "metadata": {
+        "businessName": "Test",
+        "businessWebsite": "Test",
+        "fname": "Seungchan",
+        "freeSampleAlreadySent": true,
+        "lname": "Lee",
+        "professional": true,
+        "referral": {
+            "credit": 0
+        },
+        "story": "Test"
+    },
+    "name": "seunggs@gmail.com",
+    "nickname": "seunggs",
+    "picture": "https://s.gravatar.com/avatar/9381c58d295694bd913fffc38c46123c?s=480&r=pg&d=https%3A%2F%2Fcdn.auth0.com%2Favatars%2Fse.png",
+        "referralCode": "SLEE",
+    "referred_by": "",
+    "updated_at": "2017-03-21T04:40:27.146Z",
+    "user_id": "auth0|58d0aeba6983e422876e9eb5"
 }
 
 state$.subscribe(
@@ -51,15 +117,24 @@ state$.subscribe(
     const productDetails = R.isEmpty(productDetailsState) ? [] : productDetailsState
     const shippingDetailsState = getElemState(rootState, 'shippingDetailsDemoState')
     const shippingDetails = R.isEmpty(shippingDetailsState) ? [] : shippingDetailsState
+    const ready = !R.isEmpty(productDetails) && !R.isEmpty(shippingDetails) ? true : false
 
     render(
       <App
+        ready={ready}
         rootState={rootState}
         stripe={stripeInstance}
         locale={locale}
+        track={track}
+        prefill={prefill}
+        userProfile={userProfile}
+        countryCode={countryCode}
         productDetails={productDetails}
         shippingDetails={shippingDetails}
         cartItems={cartItems}
+        onChargeSuccess={() => {console.log('onChargeSuccess ran!')}}
+        onCreateCustomerSuccess={() => {console.log('onCreateCustomerSuccess ran!')}}
+        isPos={true}
       />, document.getElementById('app')
     )
   }

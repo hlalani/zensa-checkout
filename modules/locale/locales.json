@@ -3,14 +3,12 @@
     "locale": "en-US",
     "domain": "com",
     "currency": "usd",
-    "currencySymbol": "$",
-    "countryCode": "US"
+    "currencySymbol": "$"
   },
   "en-CA": {
     "locale": "en-CA",
     "domain": "ca",
     "currency": "cad",
-    "currencySymbol": "$",
-    "countryCode": "CA"
+    "currencySymbol": "$"
   }
 }

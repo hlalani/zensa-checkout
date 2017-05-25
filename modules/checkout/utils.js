@@ -7,20 +7,69 @@ import {
   RETAIL_VOLUME_DISCOUNT_TABLE,
   REFERRED_CREDIT_RATE,
 } from '../global/constants'
+import {changeState} from '../state/events'
+import {resetState} from '../state/core'
+import {
+  EMAIL_FIELD_ID,
+  SHIPPING_ADDRESS_NAME_FIELD_ID,
+  SHIPPING_ADDRESS_LINE1_FIELD_ID,
+  SHIPPING_ADDRESS_ZIP_FIELD_ID,
+  SHIPPING_ADDRESS_CITY_FIELD_ID,
+  SHIPPING_ADDRESS_STATE_FIELD_ID,
+  SHIPPING_ADDRESS_COUNTRY_FIELD_ID,
+  BILLING_ADDRESS_NAME_FIELD_ID,
+  BILLING_ADDRESS_LINE1_FIELD_ID,
+  BILLING_ADDRESS_ZIP_FIELD_ID,
+  BILLING_ADDRESS_CITY_FIELD_ID,
+  BILLING_ADDRESS_STATE_FIELD_ID,
+  BILLING_ADDRESS_COUNTRY_FIELD_ID,
+  PHONE_FIELD_ID,
+  PAY_BUTTON_ID,
+} from '../state/constants'
 import {
   getProUserByReferralCodeFromDB$$,
   updateProUserReferralCreditInDB$$,
   updateProUserInDB$$,
 } from '../professional-users/observables'
 import {sendEmail$$} from '../sendgrid/observables'
-import stateList from '../locale/states.json'
+import {hidePageLoading, showPageLoadingSuccess, hidePageLoadingSuccess} from '../page-loading/core'
+
+/**
+ * GENERAL UTILITY FUNCTIONS
+ */
+
+/**
+ * between :: [Integer, Integer] -> Integer -> Boolean
+ * Find out if a given number falls within an two numbers in an array
+ *    i.e. between([10, 24], 7) -> false
+ *    i.e. between([10, 24], 11) -> true
+ */
+const between = R.curry((arr, num) => {
+  return R.head(arr) <= num && R.last(arr) >= num
+})
+
+/**
+ * indexOfRange :: [Integer] -> Integer -> Integer
+ * Get the index of where the given number falls within a given array of integers
+ *    i.e. indexOfRange([10, 24, 96], 8) -> 0
+ *    i.e. indexOfRange([10, 24, 96], 20) -> 1
+ */
+const indexOfRange = R.curry((arr, num) => {
+  const ranges = R.compose(R.append([R.last(arr), Infinity]), R.map(eachNum => {
+    const i = R.indexOf(eachNum, arr)
+    return [R.when(R.isNil, () => 0)(R.prop(i - 1, arr)), eachNum - 1]
+  }))(arr) // [[1, 9], [10, 23], [24, 95], [96, Infinity]]
+  const whichRange = R.map(range => between(range, num))(ranges) // [true, false, false, false]
+  return R.indexOf(true, whichRange)
+})
+
 
 /**
  * UTILITY FUNCTIONS
  */
 
-function checkQualifiesForSigningBonus(userProfile) {
-  const isPro = !R.isNil(userProfile)
+function checkQualifiesForSigningBonus(props) {
+  const isPro = checkIsPro(props)
   if (!isPro) { return null }
 
   const {created_at} = userProfile
@@ -104,7 +153,8 @@ function addReferralCredit(userProfile, referralTotal, referrerEmail) {
 }
 
 function parseGoogleAddressComponents(addressComponents, type) {
-  return R.compose(R.prop('long_name'), R.head, R.filter(R.where({types: R.contains(type)})))(addressComponents)
+  const addressComponent = R.filter(R.where({types: R.contains(type)}))(addressComponents)
+  return R.isEmpty(addressComponent) ? 'Unknown' : R.compose(R.prop('short_name'), R.head)(addressComponent)
 }
 
 function getProductSubtotals(locale, productDetails, cartItems) {
@@ -117,6 +167,8 @@ function getProductSubtotals(locale, productDetails, cartItems) {
 }
 
 function getCouponDiscount(cartItemsWithDetail, subtotal, coupon) {
+  if (R.isNil(coupon) || R.isEmpty(coupon)) { return 0 }
+
   const {discount, type, applyTo} = coupon
   if (type === 'dollar') {
     return discount
@@ -182,6 +234,11 @@ function getStateCode(stateName) {
 
 /* --- EXPORTED FUNCTIONS --- */
 
+export const checkIsPro = (props) => {
+  const {userProfile, salesTeamUserProfile} = props
+  return !R.isNil(userProfile) || !R.isNil(salesTeamUserProfile)
+}
+
 // getCartItemsWithDetail :: {*} -> {*} -> [{*}]
 export const getCartItemsWithDetail = (props) => {
   /*
@@ -203,7 +260,7 @@ export const getCartItemsWithDetail = (props) => {
 
   const {locale, cartItems, productDetails, userProfile = null} = props
   const {currency} = locale
-  const isPro = !R.isNil(userProfile)
+  const isPro = checkIsPro(props)
 
   if (R.isNil(cartItems)) { return [] }
 
@@ -220,7 +277,7 @@ export const getCartItemsWithDetail = (props) => {
     // If userProfile is null, then it means this is retail checkout and signing bonus doesn't exist at all
     return cartItemsWithDetail
   } else {
-    const qualifiesForSigningBonus = checkQualifiesForSigningBonus(userProfile)
+    const qualifiesForSigningBonus = checkQualifiesForSigningBonus(props)
 
     if (qualifiesForSigningBonus) {
       // This would be pro checkout with signing bonus
@@ -276,11 +333,11 @@ export const getSubtotal = (props) => {
 export const getDiscount = (props) => {
   const {userProfile = null, cartItems, locale, productDetails, coupon} = props
   const {currency} = locale
-  const isPro = !R.isNil(userProfile)
+  const isPro = checkIsPro(props)
   const cartItemsWithDetail = getCartItemsWithDetail(props)
   const productSubtotals = getProductSubtotals(locale, productDetails, cartItems)
   const subtotal = getSubtotal(props)
-  const couponDiscount = R.isNil(coupon) ? 0 : getCouponDiscount(cartItemsWithDetail, subtotal, coupon)
+  const couponDiscount = (R.isNil(coupon) || R.isEmpty(coupon)) ? 0 : getCouponDiscount(cartItemsWithDetail, subtotal, coupon)
 
   if (isPro) {
     const proVolumeDiscounts = getProVolumeDiscounts(currency, productDetails, cartItemsWithDetail)
@@ -299,7 +356,7 @@ export const getReferralCredit = (props, subtotalAfterDiscount) => {
     2) if you refer someone (referralCredit)
   */
   const {userProfile} = props
-  const isPro = !R.isNil(userProfile)
+  const isPro = checkIsPro(props)
 
   if (isPro) {
     // Case #1
@@ -315,18 +372,33 @@ export const getReferralCredit = (props, subtotalAfterDiscount) => {
   }
 }
 
-export const getShippingOptions = (userProfile, shippingDetails) => {
-  const isPro = !R.isNil(userProfile)
+export const getShippingOptions = (props) => {
+  const {isPos, userProfile, shippingDetails, countryCode} = props
+  const isPro = checkIsPro(props)
+  const isInternational = countryCode !== 'US' && countryCode !== 'CA'
   if (isPro) {
-    return R.filter(option => R.prop('professional', option), shippingDetails)
+    const proShippingOptions = R.filter(option => {
+      const nameContainsIntl = R.compose(R.contains('intl'), R.toLower, R.prop('name'))(option)
+      return isInternational ? R.prop('professional', option) && nameContainsIntl : R.prop('professional', option) && !nameContainsIntl
+    }, shippingDetails)
+    if (isPos) {
+      return proShippingOptions
+    } else {
+      return R.reject(R.propEq('pos', true))(proShippingOptions)
+    }
   } else {
-    return R.filter(option => !R.prop('professional', option), shippingDetails)
+    return R.filter(option => {
+      const nameContainsIntl = R.compose(R.contains('intl'), R.toLower, R.prop('name'))(option)
+      return isInternational ? !R.prop('professional', option) && nameContainsIntl : !R.prop('professional', option) && !nameContainsIntl
+    }, shippingDetails)
   }
 }
 
 export const getShippingRate = (props, shippingMethod) => {
+  if (R.isNil(shippingMethod)) { return 0 }
+
   const {userProfile = null, locale, shippingDetails, productDetails, cartItems} = props
-  const isPro = !R.isNil(userProfile)
+  const isPro = checkIsPro(props)
   const {currency} = locale
   const currentShippingMethodDetails = R.compose(R.head, R.filter(obj => obj.name === shippingMethod))(shippingDetails)
 
@@ -338,30 +410,39 @@ export const getShippingRate = (props, shippingMethod) => {
   }
 }
 
-export const getTotal = (props, shippingMethod) => {
-  const {billingZip, billingState, locale} = props
-  const {countryCode} = locale
+export const getTotal = (props, formData) => {
+  const {shippingMethod} = formData
   const subtotal = getSubtotal(props)
   const shippingRate = getShippingRate(props, shippingMethod)
-  const salesTax = getSalesTax(props, subtotal, shippingRate)
+  const salesTax = getSalesTax(formData, subtotal, shippingRate)
   const discount = getDiscount(props)
   const subtotalAfterDiscount = subtotal - discount
   const referralCredit = getReferralCredit(props, subtotalAfterDiscount)
   return subtotal + shippingRate + salesTax - discount - referralCredit
 }
 
+export const getFullAddressFromStateValues = (addressStateValues) => {
+  // Concatenate the city, country and zipcode fields and check google geocode API to get the state
+  return R.reduce((prev, curr) => {
+    if (prev === '') { return curr }
+    return prev + ', ' + curr
+  }, '')(addressStateValues)
+}
+
 export const getStateFromFullAddress$$ = (fullAddress) => {
   const encodedAddress = encodeURIComponent(fullAddress)
   return Rx.Observable.fromPromise(axios.get(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodedAddress}&sensor=true`))
     .map(res => {
+      if (R.isEmpty(res.data.results)) { return 'Unknown' }
       const addressComponents = res.data.results[0].address_components
-      const state = parseGoogleAddressComponents(addressComponents, 'administrative_area_level_1')
-      const stateCode = getStateCode(state)
+      const stateCode = parseGoogleAddressComponents(addressComponents, 'administrative_area_level_1')
       return stateCode
     })
 }
 
-export const getSalesTax = (zip, stateCode, countryCode, subtotal, shippingRate) => {
+export const getSalesTax = (formData, subtotal,shortppingRate) => {
+  const {billingAddress} = formData
+  const {zip, state, country} = billingAddress
   return 0
 }
 
@@ -408,4 +489,63 @@ export const sendOrderEmail = (payload) => {
     res => console.log('Email successfully sent', res),
     err => console.log('Something went wrong while sending email: ', err)
   )
+}
+
+export const getPaymentMethods = () => {
+  return [
+    {value: 'cc', label: 'Credit Card'},
+    {value: 'manual', label: 'Manual'},
+  ]
+}
+
+export const createShipment = (props, formData) => {
+  const {shippingMethod} = formData
+
+  // Do nothing if shipment is manual
+  if (shippingMethod === 'professionalManual') { return }
+
+  // Create shipment in Shippo
+
+  // Generate shipping label in Shippo
+
+}
+
+export const processXero = () => {
+  // Create/update Xero customer
+
+  // Create Xero invoice and mark it paid if the charge is immediate
+
+}
+
+
+export const resetAllFields = (props) => {
+  console.log('resetting fields')
+  const {rootState} = props
+  const allFieldStateIds = [
+    EMAIL_FIELD_ID,
+    SHIPPING_ADDRESS_NAME_FIELD_ID,
+    SHIPPING_ADDRESS_LINE1_FIELD_ID,
+    SHIPPING_ADDRESS_ZIP_FIELD_ID,
+    SHIPPING_ADDRESS_CITY_FIELD_ID,
+    SHIPPING_ADDRESS_STATE_FIELD_ID,
+    SHIPPING_ADDRESS_COUNTRY_FIELD_ID,
+    BILLING_ADDRESS_NAME_FIELD_ID,
+    BILLING_ADDRESS_LINE1_FIELD_ID,
+    BILLING_ADDRESS_ZIP_FIELD_ID,
+    BILLING_ADDRESS_CITY_FIELD_ID,
+    BILLING_ADDRESS_STATE_FIELD_ID,
+    BILLING_ADDRESS_COUNTRY_FIELD_ID,
+    PHONE_FIELD_ID,
+  ]
+  R.forEach(fieldStateId => resetState(rootState, fieldStateId))(allFieldStateIds)
+}
+
+export const runFinalCleanup = () => {
+  console.log('Running final cleanup')
+  showPageLoadingSuccess()
+  setTimeout(() => {
+    changeState(PAY_BUTTON_ID, {disabled: false})
+    hidePageLoading()
+    hidePageLoadingSuccess()
+  }, 2500)
 }

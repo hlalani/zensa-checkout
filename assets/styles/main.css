@@ -27,13 +27,16 @@
 @import './overrides/_flexboxgrid';
 @import './overrides/_flexbox';
 @import './overrides/_type-scale';
+@import './overrides/_typography';
 @import './overrides/_colors';
 @import './overrides/_background-colors';
 
 @import './modules/_forms';
 @import './modules/_transitions';
+@import './modules/_icons';
 
 @import './external/_react-select';
+@import './external/_react-collapsible';
 
 body {
   font-family: var(--font-family);

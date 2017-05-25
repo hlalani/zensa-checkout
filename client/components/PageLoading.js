@@ -7,10 +7,10 @@ import {changeState} from '../../modules/state/events'
 import {lightGold} from '../../modules/styles/colors'
 
 import SuccessIcon from './Icons/SuccessIcon'
-import CircularProgress from './Icons/CircularProgress'
+import CircularLoader from './Icons/CircularLoader'
 
 export default class PageLoading extends Component {
-  propTypes = {
+  static propTypes = {
     rootState: PropTypes.object.isRequired,
   }
 
@@ -33,6 +33,7 @@ export default class PageLoading extends Component {
     const initialStyle = {opacity: 0, display: 'none'}
     const finalStyle = {opacity: 1, display: 'block'}
     const style = isPageLoadingVisible ? finalStyle : initialStyle
+    // console.log('rendered page loading')
 
     return (
       <div style={style}>
@@ -43,7 +44,7 @@ export default class PageLoading extends Component {
               style={{position: 'fixed', margin: 'auto'}}
             />
           ) : (
-            <CircularProgress
+            <CircularLoader
               color={lightGold}
               className="top-0 right-0 bottom-0 left-0 z5"
               style={{position: 'fixed', margin: 'auto'}}

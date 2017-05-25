@@ -1,0 +1,156 @@
+.icon-success-animated-circle {
+  stroke-dasharray: 166;
+  stroke-dashoffset: 166;
+  stroke-width: 3;
+  stroke-miterlimit: 10;
+  stroke-linecap: round;
+  stroke: var(--light-gold);
+  fill: none;
+  animation: icon-success-animated-stroke .6s cubic-bezier(0.650, 0.000, 0.450, 1.000) forwards;
+}
+
+.icon-success-animated {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: block;
+  stroke-width: 2;
+  stroke: #fff;
+  stroke-miterlimit: 10;
+  stroke-linecap: round;
+  margin: 10% auto;
+  box-shadow: inset 0px 0px 0px var(--light-gold);
+  animation: icon-success-animated-fill .4s ease-in-out .4s forwards, icon-success-animated-scale .3s ease-in-out .9s both;
+}
+
+.icon-success-animated-check {
+  transform-origin: 50% 50%;
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: icon-success-animated-stroke .3s cubic-bezier(0.650, 0.000, 0.450, 1.000) .8s forwards;
+}
+
+@keyframes icon-success-animated-stroke {
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes icon-success-animated-scale {
+  0%, 100% {
+    transform: none;
+  }
+  50% {
+    transform: scale3d(1.1, 1.1, 1);
+  }
+}
+
+@keyframes icon-success-animated-fill {
+  100% {
+    box-shadow: inset 0px 0px 0px 30px var(--light-gold);
+  }
+}
+
+.loader {
+  position: relative;
+  margin: 0px auto;
+  width: 60px;
+  height: 60px;
+}
+.loader:before {
+  content: '';
+  display: block;
+  padding-top: 100%;
+}
+
+.circular-loader {
+  -webkit-animation: rotate 2s linear infinite;
+          animation: rotate 2s linear infinite;
+  height: 100%;
+  -webkit-transform-origin: center center;
+      -ms-transform-origin: center center;
+          transform-origin: center center;
+  width: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: auto;
+}
+
+.loader-path {
+  stroke-dasharray: 150,200;
+  stroke-dashoffset: -10;
+  -webkit-animation: dash 1.5s ease-in-out infinite, color 6s ease-in-out infinite;
+          animation: dash 1.5s ease-in-out infinite, color 6s ease-in-out infinite;
+  stroke-linecap: round;
+}
+
+@-webkit-keyframes rotate {
+  100% {
+    -webkit-transform: rotate(360deg);
+            transform: rotate(360deg);
+  }
+}
+
+@keyframes rotate {
+  100% {
+    -webkit-transform: rotate(360deg);
+            transform: rotate(360deg);
+  }
+}
+@-webkit-keyframes dash {
+  0% {
+    stroke-dasharray: 1,200;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 89,200;
+    stroke-dashoffset: -35;
+  }
+  100% {
+    stroke-dasharray: 89,200;
+    stroke-dashoffset: -124;
+  }
+}
+@keyframes dash {
+  0% {
+    stroke-dasharray: 1,200;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 89,200;
+    stroke-dashoffset: -35;
+  }
+  100% {
+    stroke-dasharray: 89,200;
+    stroke-dashoffset: -124;
+  }
+}
+@-webkit-keyframes color {
+  0% {
+    stroke: #c9b17b;
+  }
+  40% {
+    stroke: #c9b17b;
+  }
+  66% {
+    stroke: #c9b17b;
+  }
+  80%, 90% {
+    stroke: #c9b17b;
+  }
+}
+@keyframes color {
+  0% {
+    stroke: #c9b17b;
+  }
+  40% {
+    stroke: #c9b17b;
+  }
+  66% {
+    stroke: #c9b17b;
+  }
+  80%, 90% {
+    stroke: #c9b17b;
+  }
+}

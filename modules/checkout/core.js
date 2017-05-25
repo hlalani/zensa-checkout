@@ -29,6 +29,10 @@ import {
   getTotal,
   handleReferral,
   sendOrderEmail,
+  createShipment,
+  processXero,
+  resetAllFields,
+  runFinalCleanup,
 } from './utils'
 import {createCustomerAndCharge$$, charge$$, createCustomer$$} from '../stripe/observables'
 import {subscribeNewMember$$, deleteMember$$} from '../mailchimp/observables'
@@ -50,14 +54,14 @@ import {saveOrder} from '../orders/graphql'
  */
 
 function handleRetailStripeTokenSuccess(token, props, formData) {
-  const {locale, coupon, shippingDetails} = props
-  const {id: couponId} = coupon
-  const retailShippingDetails = getRetailShippingDetails(shippingDetails)
+  const {locale, coupon, shippingDetails, userProfile, countryCode} = props
+  const {couponId = 'None'} = coupon
+  const shippingOptions = getShippingOptions(props)
   const cartItemsWithDetail = getCartItemsWithDetail(props)
   const {currency} = locale
   const {email, billingAddress, shippingAddress, phone, shippingMethod} = formData
   const shippingRate = getShippingRate(props, shippingMethod)
-  const total = getTotal(props, shippingMethod)
+  const total = getTotal(props, formData)
   const {
     name: shippingName,
     line1: shippingLine1,
@@ -80,7 +84,7 @@ function handleRetailStripeTokenSuccess(token, props, formData) {
     phone,
     couponId,
     business_name: 'N/A',
-    shipping_method: getShippingMethodTitle(retailShippingDetails, shippingMethod),
+    shipping_method: getShippingMethodTitle(shippingOptions, shippingMethod),
     shipping_price: shippingRate / 100,
     products: getProductContent(cartItemsWithDetail),
     quantity: getTotalQuantity(cartItemsWithDetail),
@@ -94,7 +98,7 @@ function handleRetailStripeTokenSuccess(token, props, formData) {
   // create a Stripe customer and charge him/her right away
   createCustomerAndCharge$$(tokenObj, stripeAddress, stripeMetadata, stripeOptions).subscribe(
     chargeData => {
-      console.log('Creating customer and card charge successful!', chargeData)
+      // console.log('Creating customer and card charge successful!', chargeData)
       handleRetailChargeSuccess(props, chargeData)
     },
     err => {
@@ -110,7 +114,7 @@ function handleRetailStripeTokenSuccess(token, props, formData) {
 function handleRetailChargeSuccess(props, chargeData) {
   const {receipt_email: email, metadata: chargeMetadata, amount} = chargeData
   const {name, phone, business_name, line1, postal_code, city, state, country, shipping_method} = chargeMetadata
-  const {onChargeSuccess, track, locale, cartItems, productDetails, addToEmailList = true} = props
+  const {onChargeSuccess, track, locale, cartItems, productDetails, addToEmailList = true, rootState} = props
   const cartItemsWithDetail = getCartItemsWithDetail(props)
   const {currency} = locale
 
@@ -151,7 +155,7 @@ function handleRetailChargeSuccess(props, chargeData) {
   }
   sendOrderEmail(payload)
 
-  // save order
+  // Save order
   const customerInfo = {
     email,
     name,
@@ -168,12 +172,27 @@ function handleRetailChargeSuccess(props, chargeData) {
   const orderObj = createOrder(productDetails, cartItems, customerInfo, shipping, shipping_method)
   saveOrder(orderObj)
 
-  // handle post charge wrap up
-  onChargeSuccess()
-  // reset cart items to 0
-  // reset fields
-  // wipe out coupon code if it's one time use coupon
-  // re-enable the button, show success icon, disable page loading, then redirect to thank-you page
+  /**
+   * Shippo: Create shipment and shipping label
+   */
+  // createShipment()
+
+  /**
+   * Xero:
+   *    1) Create customer (or update)
+   *    2) Create an invoice
+   *    3) Mark it paid if payment is immediate
+   */
+  // processXero()
+
+  // // Reset all fields
+  // resetAllFields(props)
+
+  // Handle post charge clean up
+  onChargeSuccess(rootState, chargeData)
+
+  // Re-enable the button, show success icon, disable page loading
+  runFinalCleanup()
 }
 
 /**
@@ -181,16 +200,16 @@ function handleRetailChargeSuccess(props, chargeData) {
  */
 
 function handleProStripeTokenSuccess(token, props, formData) {
-  const {locale, coupon, userProfile, shippingDetails} = props
-  const {id: couponId} = coupon
+  const {locale, coupon, userProfile, shippingDetails, countryCode} = props
+  const {couponId = 'None'} = coupon
   const cartItemsWithDetail = getCartItemsWithDetail(props)
-  const shippingOptions = getShippingOptions(userProfile, shippingDetails)
+  const shippingOptions = getShippingOptions(props)
   const {metadata: userProfileMetadata} = userProfile
   const {businessName} = userProfileMetadata
   const {currency} = locale
   const {email, billingAddress, shippingAddress, phone, shippingMethod} = formData
   const shippingRate = getShippingRate(props, shippingMethod)
-  const total = getTotal(props, shippingMethod)
+  const total = getTotal(props, formData)
   const {
     name: shippingName,
     line1: shippingLine1,
@@ -228,7 +247,7 @@ function handleProStripeTokenSuccess(token, props, formData) {
   createCustomerAndCharge$$(tokenObj, stripeAddress, stripeMetadata, stripeOptions).subscribe(
     chargeData => {
       console.log('Creating customer and card charge successful!', chargeData)
-      handleProChargeSuccess(onChargeSuccess, track, chargeData)
+      handleProChargeSuccess(props, chargeData)
     },
     err => {
       const error = {
@@ -243,7 +262,7 @@ function handleProStripeTokenSuccess(token, props, formData) {
 function handleProChargeSuccess(props, chargeData) {
   const {receipt_email: email, metadata: chargeMetadata, amount} = chargeData
   const {name, phone, business_name, line1, postal_code, city, state, country, shipping_method} = chargeMetadata
-  const {onChargeSuccess, track, locale, cartItems, productDetails, userProfile, customer, addToEmailList = true} = props
+  const {onChargeSuccess, track, locale, cartItems, productDetails, userProfile, customer, addToEmailList = true, rootState} = props
   const cartItemsWithDetail = getCartItemsWithDetail(props)
   const {currency} = locale
 
@@ -303,7 +322,7 @@ function handleProChargeSuccess(props, chargeData) {
   }
   sendOrderEmail(payload)
 
-  // save order
+  // Save order
   const customerInfo = {
     email,
     name,
@@ -320,30 +339,27 @@ function handleProChargeSuccess(props, chargeData) {
   const orderObj = createOrder(productDetails, cartItems, customerInfo, shipping, shipping_method)
   saveOrder(orderObj)
 
-  // handle post charge wrap up
-  onChargeSuccess()
+  /**
+   * Shippo: Create shipment and shipping label
+   */
+  // createShipment()
 
-  // // Reset customer to state so everything (i.e. add billing warning) will update
-  // getCustomer$$(email).subscribe(
-  //   customerObj => changeState(PROFESSIONAL_CUSTOMER_ID, {customer: customerObj, exists: true}),
-  //   err => console.log('Something went wrong while retrieving customer from Stripe', err)
-  // )
-  //
-  // // also set same shipping and billing address checkbox to false (which applies for all existing customers)
-  // changeState(PROFESSIONAL_BILLING_SAME_SHIPPING_AND_BILLING_CHECKBOX_ID, {checked: false})
+  /**
+   * Xero:
+   *    1) Create customer (or update)
+   *    2) Create an invoice
+   *    3) Mark it paid if payment is immediate
+   */
+  // processXero()
 
-  // // Reset userProfile in state so referral values would be reset
-  // const idToken = getToken()
-  // setUserProfile$$(idToken, PROFESSIONAL_USER_PROFILE_ID)
-  //   .subscribe(
-  //     profileFromDB => console.log('User profile successfully retrieved'),
-  //     err => console.log('Something went wrong while retrieving user profile')
-  //   )
+  // // Reset all fields
+  // resetAllFields(props)
 
-  // reset cart items to 0
-  // reset fields
-  // wipe out coupon code if it's one time use coupon
-  // re-enable the button, show success icon, disable page loading, then redirect to thank-you page
+  // Handle post charge clean up
+  onChargeSuccess(rootState, chargeData)
+
+  // Re-enable the button, show success icon, disable page loading
+  runFinalCleanup()
 }
 
 /**
@@ -393,7 +409,7 @@ function handleUpdateBillingStripeTokenSuccess(token, props, formData) {
 }
 
 function handleCreateCustomerSuccess(props, customerObj) {
-  const {userProfile, track, onChargeSuccess} = props
+  const {userProfile, track, onCreateCustomerSuccess} = props
   const {metadata: customerMetadata} = customerObj
   const {name} = customerMetadata
   const {email, metadata: userProfileMetadata} = userProfile
@@ -424,17 +440,21 @@ function handleCreateCustomerSuccess(props, customerObj) {
     )
   }
 
-  // handle post charge wrap up
-  onChargeSuccess()
+  // handle post create customer clean up
+  onCreateCustomerSuccess(customerObj)
 
-  // // set customer to state so everything (i.e. add billing warning) will update
-  // changeState(PROFESSIONAL_CUSTOMER_ID, {customer: customerObj, exists: true})
-  //
-  // // also set same shipping and billing address checkbox to false (which applies for all existing customers)
-  // changeState(PROFESSIONAL_BILLING_SAME_SHIPPING_AND_BILLING_CHECKBOX_ID, {checked: false})
-  //
-  // // re-enable the button, show success icon, disable page loading
+  // Re-enable the button, show success icon, disable page loading
+  runFinalCleanup()
 }
+
+/**
+ * PROCESS SAMPLE
+ */
+
+
+
+
+
 
 /* --- EXPORTED FUNCTIONS --- */
 
@@ -443,15 +463,15 @@ function handleCreateCustomerSuccess(props, customerObj) {
  */
 
 export const handleStripeError = (err) => {
+  console.log('handleStripeError', err)
   if (!R.isNil(err.message)) {
-    changeState(OUTCOME_MESSAGE_ID, {value: err.message, visible: true})
+    changeState(OUTCOME_MESSAGE_ID, {msg: err.message, type: 'error', visible: true})
   } else {
-    changeState(OUTCOME_MESSAGE_ID, {value: 'Something went wrong. Please try again or contact support.', visible: true})
+    changeState(OUTCOME_MESSAGE_ID, {msg: 'Something went wrong. Please try again or contact support.', type: 'error', visible: true})
   }
 }
 
-export const handleStripeOutcome = (result, props, formData) => {
-  console.log('result', result)
+export const handleStripeOutcome = (result, props = {}, formData) => {
   changeState(OUTCOME_MESSAGE_ID, {visible: false})
 
   const {userProfile = null, updateBilling = false} = props
@@ -460,12 +480,15 @@ export const handleStripeOutcome = (result, props, formData) => {
   if (result.token) {
     // First check if we're updating billing
     if (updateBilling) {
+      console.log('Updating billing')
       handleUpdateBillingStripeTokenSuccess(result.token, props, formData)
     } else {
       // Then check if we're charging for retail or pro
       if (isPro) {
+        console.log('Charging pro')
         handleProStripeTokenSuccess(result.token, props, formData)
       } else {
+        console.log('Charging retail')
         handleRetailStripeTokenSuccess(result.token, props, formData)
       }
     }
@@ -510,10 +533,10 @@ export const charge = (props, formData, card) => {
 }
 
 export const chargeExistingPro = (props, formData) => {
-  const {customer, userProfile, locale, coupon, shippingDetails} = props
-  const {id: couponId} = coupon
+  const {customer, userProfile, locale, coupon, shippingDetails, countryCode} = props
+  const {couponId = 'None'} = coupon
   const cartItemsWithDetail = getCartItemsWithDetail(props)
-  const shippingOptions = getShippingOptions(userProfile, shippingDetails)
+  const shippingOptions = getShippingOptions(props)
   const {currency} = locale
   const {shippingMethod} = formData
   const shippingRate = getShippingRate(props, shippingMethod)
@@ -540,6 +563,7 @@ export const chargeExistingPro = (props, formData) => {
     currency: currency,
     metadata: stripeMetadata,
   }
+  console.log('Charging existing pro')
   charge$$(payload)
     .subscribe(
       chargeData => {
@@ -589,8 +613,87 @@ export const updateBilling = (props, formData, card) => {
 }
 
 /**
- * SAMPLE (i.e. subtotal is 0)
+ * PROCESS SAMPLE
  */
 export const processSample = (props, formData) => {
+  /**
+   * Save to shipping list, create shipment and process Xero
+   * NOTE: Exactly same as chargeManual flow EXCEPT FOR CHARGING 1 cent in Xero
+   */
+  const {email, shippingAddress, phone, shippingMethod} = formData
+  const {name, line1, postal_code, city, state, country} = shippingAddress
+  const {salesTeamUserProfile, productDetails, cartItems} = props
+  const {business_name} = salesTeamUserProfile
 
+  // Save order
+  const customerInfo = {
+    email,
+    name,
+    businessName: business_name,
+    phone,
+  }
+  const shipping = {
+    address_line1: line1,
+    address_zip: zip,
+    address_city: city,
+    address_state: state,
+    address_country: country,
+  }
+  const orderObj = createOrder(productDetails, cartItems, customerInfo, shipping, shippingMethod)
+  saveOrder(orderObj)
+
+  // Create shipment
+  createShipment()
+
+  // Process Xero
+  processXero()
+}
+
+/**
+ * SCHEDULED CHARGE (i.e. net 30)
+ */
+export const chargeLater = (props, formData, card) => {
+  // Create Stripe customer but don't charge
+
+
+  // Add scheduledCharge obj to DB
+  
+
+}
+
+/**
+ * CHARGE MANUALLY
+ */
+export const chargeManual = (props, formData) => {
+  /**
+   * Save to shipping list, create shipment and process Xero
+   * NOTE: Exactly same as sample flow EXCEPT FOR process Xero
+   */
+  const {email, shippingAddress, phone, shippingMethod} = formData
+  const {name, line1, postal_code, city, state, country} = shippingAddress
+  const {salesTeamUserProfile, productDetails, cartItems} = props
+  const {business_name} = salesTeamUserProfile
+
+  // Save order
+  const customerInfo = {
+    email,
+    name,
+    businessName: business_name,
+    phone,
+  }
+  const shipping = {
+    address_line1: line1,
+    address_zip: zip,
+    address_city: city,
+    address_state: state,
+    address_country: country,
+  }
+  const orderObj = createOrder(productDetails, cartItems, customerInfo, shipping, shippingMethod)
+  saveOrder(orderObj)
+
+  // Create shipment
+  createShipment()
+
+  // Process Xero
+  processXero()
 }
