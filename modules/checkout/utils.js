@@ -69,6 +69,7 @@ const indexOfRange = R.curry((arr, num) => {
  */
 
 function checkQualifiesForSigningBonus(props) {
+  const {userProfile} = props
   const isPro = checkIsPro(props)
   if (!isPro) { return null }
 
@@ -506,15 +507,23 @@ export const createShipment = (props, formData) => {
 
   // Create shipment in Shippo
 
+
   // Generate shipping label in Shippo
+
 
 }
 
 export const processXero = () => {
   // Create/update Xero customer
 
-  // Create Xero invoice and mark it paid if the charge is immediate
 
+  // Create Xero invoice
+
+
+  // Mark it paid if the charge is immediate and successful
+
+
+  // Adjust the price to 1 cent if sample (it'll have price of 0 otherwise)
 }
 
 
@@ -538,6 +547,9 @@ export const resetAllFields = (props) => {
     PHONE_FIELD_ID,
   ]
   R.forEach(fieldStateId => resetState(rootState, fieldStateId))(allFieldStateIds)
+
+  // // Also set same shipping and billing address checkbox to false
+  // changeState(SAME_SHIPPING_BILLING_CHECKBOX_ID, {checked: false})
 }
 
 export const runFinalCleanup = () => {

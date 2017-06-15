@@ -38,10 +38,11 @@ import {createCustomerAndCharge$$, charge$$, createCustomer$$} from '../stripe/o
 import {subscribeNewMember$$, deleteMember$$} from '../mailchimp/observables'
 import {createOrder} from '../orders/core'
 import {saveOrder} from '../orders/graphql'
+import {createScheduledCharge} from '../scheduled-charges/graphql'
 
 /**
  * 1) If updateBilling === true, run updateBilling().
- *    handleStripeOutcome() will run handleUpdateBillingStripeTokenSuccess()
+ *    handleStripeOutcome() will run handleCreateCustomerStripeTokenSuccess()
  * 2) If updateBilling !== true, then see if billing already exists (i.e. customer !== nil).
  *    a) If billing already exists, don't show payment form. Run chargeExistingPro().
  *    b) If billing doesn't exist, show payment form and run charge(). charge() will see if this user is pro (i.e. userProfile !== nil)
@@ -363,10 +364,12 @@ function handleProChargeSuccess(props, chargeData) {
 }
 
 /**
- * UPDATE BILLING
+ * CREATE CUSTOMER
+ *    1) UPDATE BILLING
+ *    2) SCHEDULED CHARGE
  */
 
-function handleUpdateBillingStripeTokenSuccess(token, props, formData) {
+function handleCreateCustomerStripeTokenSuccess(token, props, formData) {
   const {locale, userProfile} = props
   const {metadata: userProfileMetadata} = userProfile
   const {businessName} = userProfileMetadata
@@ -400,7 +403,7 @@ function handleUpdateBillingStripeTokenSuccess(token, props, formData) {
   createCustomer$$(tokenObj, stripeAddress, stripeMetadata).subscribe(
     customerObj => {
       // console.log('Creating customer successful!', customerObj)
-      handleCreateCustomerSuccess(props, customerObj)
+      handleCreateCustomerSuccess(props, formData, customerObj)
     },
     err => {
       handleStripeError(err)
@@ -408,16 +411,18 @@ function handleUpdateBillingStripeTokenSuccess(token, props, formData) {
   )
 }
 
-function handleCreateCustomerSuccess(props, customerObj) {
+function handleCreateCustomerSuccess(props, formData, customerObj) {
   const {userProfile, track, onCreateCustomerSuccess} = props
-  const {metadata: customerMetadata} = customerObj
+  const {metadata: customerMetadata, id: customerId} = customerObj
   const {name} = customerMetadata
   const {email, metadata: userProfileMetadata} = userProfile
   const {businessName, fname, lname} = userProfileMetadata
   const {new: isNewCustomer} = customerMetadata
+  const {paymentTerm} = formData
+  const isScheduledCharge = !R.equals(paymentTerm, 0) && !R.isNil(paymentTerm)
 
-  // track and send email if it's a new customer
-  if (isNewCustomer) {
+  // Track and send email if it's a new customer
+  if (isNewCustomer && !isScheduledCharge) {
     // track
     track.professionalAddBilling()
 
@@ -426,7 +431,6 @@ function handleCreateCustomerSuccess(props, customerObj) {
     const toEmailArray = R.map(email => { return {email}})(PROFESSIONAL_ADD_BILLING_NOTIFICATION_EMAILS)
     const subject = `[PROFESSIONAL ADDED BILLING INFO] ${name} (${email})`
     const content = `${name} (${email}) just added billing information in Zensa Professional portal`
-
     const payload = {
       toEmailArray,
       fromEmail,
@@ -440,20 +444,61 @@ function handleCreateCustomerSuccess(props, customerObj) {
     )
   }
 
-  // handle post create customer clean up
-  onCreateCustomerSuccess(customerObj)
+  /**
+   * If this is a scheduled charge:
+   *    1) Track and send notification email
+   *    2) Add scheduledCharge obj to DB
+   *    3) Run onScheduledChargeSuccess()
+   * Otherwise, just run onCreateCustomerSuccess()
+   */
+  if (isScheduledCharge) {
+    // Create the scheduled charge obj and save to DB
+    const chargeDate = moment().add(parseInt(paymentTerm), 'days').valueOf().toString()
+    const scheduledChargePayload = {
+      email,
+      customerId,
+      chargeOn: chargeDate,
+      chargeAttempted: false,
+      charged: false,
+    }
+    createScheduledCharge(scheduledChargePayload)
+      .then(res => {
+        console.log('Saved scheduled charge successfully', res)
+
+        // track
+        track.professionalChargeScheduled()
+
+        // Send email to notify
+        const fromEmail = {email: SUPPORT_EMAIL}
+        const toEmailArray = R.map(thisEmail => { return {email: thisEmail}})(ORDER_EMAILS)
+        const subject = `[PRO CHARGE SCHEDULED] ${name} (${email})`
+        const content = `Pro charge successfully scheduled for ${name} (${email})`
+        const payload = {
+          toEmailArray,
+          fromEmail,
+          subject,
+          content
+        }
+        sendEmail$$(payload).subscribe(
+          res => console.log('Email successfully sent', res),
+          err => console.log('Something went wrong while sending pro charge scheduled email: ', err)
+        )
+      })
+      .catch(err => {
+        console.log('Something went wrong while saving scheduled charge', err)
+        handleStripeError(err)
+      })
+
+    // handle post scheduled charge clean up
+    onScheduledChargeSuccess(customerObj)
+  } else {
+    // handle post create customer clean up
+    onCreateCustomerSuccess(customerObj)
+  }
 
   // Re-enable the button, show success icon, disable page loading
   runFinalCleanup()
 }
-
-/**
- * PROCESS SAMPLE
- */
-
-
-
-
 
 
 /* --- EXPORTED FUNCTIONS --- */
@@ -475,18 +520,24 @@ export const handleStripeOutcome = (result, props = {}, formData) => {
   changeState(OUTCOME_MESSAGE_ID, {visible: false})
 
   const {userProfile = null, updateBilling = false} = props
+  const {paymentTerm} = formData
   const isPro = !R.isNil(userProfile)
+  const hasPaymentTerm = paymentTerm !== 0
 
   if (result.token) {
     // First check if we're updating billing
     if (updateBilling) {
       console.log('Updating billing')
-      handleUpdateBillingStripeTokenSuccess(result.token, props, formData)
+      handleCreateCustomerStripeTokenSuccess(result.token, props, formData)
     } else {
       // Then check if we're charging for retail or pro
       if (isPro) {
         console.log('Charging pro')
-        handleProStripeTokenSuccess(result.token, props, formData)
+        if (hasPaymentTerm) {
+          handleProWithPaymentTermStripeTokenSuccess(result.token, props, formData)
+        } else {
+          handleProStripeTokenSuccess(result.token, props, formData)
+        }
       } else {
         console.log('Charging retail')
         handleRetailStripeTokenSuccess(result.token, props, formData)
@@ -540,7 +591,7 @@ export const chargeExistingPro = (props, formData) => {
   const {currency} = locale
   const {shippingMethod} = formData
   const shippingRate = getShippingRate(props, shippingMethod)
-  const {shipping} = customer
+  const {shipping, id: customerId} = customer
   const {name, phone} = shipping
   const {metadata: userProfileMetadata} = userProfile
   const {businessName} = userProfileMetadata
@@ -558,7 +609,7 @@ export const chargeExistingPro = (props, formData) => {
     professional_free_sample: false,
   }
   const payload = {
-    customerId: customer.id,
+    customerId,
     amount: total,
     currency: currency,
     metadata: stripeMetadata,
@@ -617,13 +668,14 @@ export const updateBilling = (props, formData, card) => {
  */
 export const processSample = (props, formData) => {
   /**
-   * Save to shipping list, create shipment and process Xero
+   * ONLY FOR POS (website has a different flow directly from pro signup)
+   * Save to shipping list, create shipment, process Xero
    * NOTE: Exactly same as chargeManual flow EXCEPT FOR CHARGING 1 cent in Xero
    */
   const {email, shippingAddress, phone, shippingMethod} = formData
   const {name, line1, postal_code, city, state, country} = shippingAddress
-  const {salesTeamUserProfile, productDetails, cartItems} = props
-  const {business_name} = salesTeamUserProfile
+  const {userProfile, productDetails, cartItems} = props
+  const {business_name} = userProfile
 
   // Save order
   const customerInfo = {
@@ -653,12 +705,38 @@ export const processSample = (props, formData) => {
  * SCHEDULED CHARGE (i.e. net 30)
  */
 export const chargeLater = (props, formData, card) => {
+  /**
+   * ONLY FOR POS
+   */
   // Create Stripe customer but don't charge
-
-
-  // Add scheduledCharge obj to DB
-  
-
+  const {stripe} = props
+  const {email, billingAddress, shippingAddress, phone, shippingMethod} = formData
+  const {
+    name: billingName,
+    line1: billingLine1,
+    city: billingCity,
+    state: billingState,
+    zip: billingZip,
+    country: billingCountry,
+  } = billingAddress
+  const {
+    name: shippingName,
+    line1: shippingLine1,
+    city: shippingCity,
+    state: shippingState,
+    zip: shippingZip,
+    country: shippingCountry,
+  } = shippingAddress
+  const extraDetails = {
+    name: R.defaultTo(shippingName, billingName),
+    address_city: R.defaultTo(shippingCity, billingCity),
+    address_country: R.defaultTo(shippingCountry, billingCountry),
+    address_line1: R.defaultTo(shippingLine1, billingLine1),
+    address_state: R.defaultTo(shippingState, billingState),
+    address_zip: R.defaultTo(shippingZip, billingCity),
+  }
+  stripe.createToken(card, extraDetails)
+    .then(result => handleStripeOutcome(result, props, formData))
 }
 
 /**
@@ -666,13 +744,14 @@ export const chargeLater = (props, formData, card) => {
  */
 export const chargeManual = (props, formData) => {
   /**
+   * ONLY FOR POS
    * Save to shipping list, create shipment and process Xero
    * NOTE: Exactly same as sample flow EXCEPT FOR process Xero
    */
   const {email, shippingAddress, phone, shippingMethod} = formData
   const {name, line1, postal_code, city, state, country} = shippingAddress
-  const {salesTeamUserProfile, productDetails, cartItems} = props
-  const {business_name} = salesTeamUserProfile
+  const {userProfile, productDetails, cartItems} = props
+  const {business_name} = userProfile
 
   // Save order
   const customerInfo = {

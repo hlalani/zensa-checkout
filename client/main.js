@@ -50,6 +50,7 @@ const track = {
   purchase: () => {},
   professionalPurchase: () => {},
   professionalAddBilling: () => {},
+  professionalChargeScheduled: () => {},
 }
 const prefill = [
   {

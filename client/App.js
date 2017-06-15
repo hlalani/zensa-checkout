@@ -53,6 +53,9 @@ import {
 } from '../modules/checkout/utils'
 import {
   handleStripeOutcome,
+  processSample,
+  chargeManual,
+  chargeLater,
   charge,
   chargeExistingPro,
   updateBilling,
@@ -75,7 +78,6 @@ export default class App extends Component {
     track: PropTypes.object.isRequired, // Mixpanel, FB pixel
     countryCode: PropTypes.string,
     userProfile: PropTypes.object,
-    salesTeamUserProfile: PropTypes.object,
     customer: PropTypes.object,
     prefill: PropTypes.array, // [{stateId: 'zcoEmailField', value: 'test@test.com'}, ...]
     coupon: PropTypes.object, // {couponId, discount, applyTo, oneTimeUse, type, validUntil}
@@ -84,6 +86,7 @@ export default class App extends Component {
     addToEmailList: PropTypes.bool,
     isPos: PropTypes.bool,
     onChargeSuccess: PropTypes.func,
+    onScheduledChargeSuccess: PropTypes.func,
     onCreateCustomerSuccess: PropTypes.func,
     btnStyle: PropTypes.object,
     btnClassName: PropTypes.string,
@@ -91,7 +94,6 @@ export default class App extends Component {
   static defaultProps = {
     countryCode: 'US',
     userProfile: null,
-    salesTeamUserProfile: null,
     customer: null,
     prefill: [],
     coupon: {},
@@ -101,6 +103,7 @@ export default class App extends Component {
     isPos: false,
     onChargeSuccess: () => {},
     onCreateCustomerSuccess: () => {},
+    onScheduledChargeSuccess: () => {},
     btnStyle: {},
     btnClassName: '',
   }
@@ -370,35 +373,62 @@ export default class App extends Component {
     /**
      * Create customer and charge based on checkout type.
      * Checkout types:
-     *    1) Update billing (updateBilling())
-     *    2) Retail (charge())
-     *    3) Pro (charge())
-     *    4) Pro existing (chargeExistingPro())
+     *    1) Sample (processSample())
+     *    2) Update billing (updateBilling())
+     *    3) Retail (charge())
+     *    4) Pro manual (chargeManual())
+     *    5) Pro with payment term (chargeLater())
+     *    6) Pro immediate - new (charge())
+     *    7) Pro immediate - existing (chargeExistingPro())
      */
     const formData = this.getFormData()
     // console.log('formData', formData)
+    const {paymentMethod = 'cc', paymentTerm = 0} = formData
+    const isFreeSample = this.checkIsFreeSample()
+    const isManualPayment = paymentMethod === 'manual'
+    const hasPaymentTerm = paymentTerm !== 0
+    const isPro = checkIsPro(this.props)
+    const isExistingCustomer = !R.isNil(customer)
 
-    if (updateBilling) {
-      // #1 update billing
-      updateBilling(this.props, formData, card)
-    } else {
-      // create customer and charge
-      const isPro = checkIsPro(this.props)
-      const isExistingCustomer = !R.isNil(customer)
-      if (!isPro) {
-        // #2 Retail
-        charge(this.props, formData, card)
-      } else {
-        // Pro
-        if (!isExistingCustomer) {
-          // #3 Pro
-          charge(this.props, formData, card)
-        } else {
-          // #4 Pro existing
-          chargeExistingPro(this.props, formData)
-        }
-      }
+    // #1 process sample
+    if (isFreeSample) {
+      processSample(this.props, formData)
+      return
     }
+
+    // #2 update billing
+    if (updateBilling) {
+      updateBilling(this.props, formData, card)
+      return
+    }
+
+    // #3 Retail
+    if (!isPro) {
+      charge(this.props, formData, card)
+      return
+    }
+
+    // #4 Pro manual
+    if (isManualPayment) {
+      chargeManual(this.props, formData)
+      return
+    }
+
+    // #5 Has a payment term - schedule charge
+    if (hasPaymentTerm) {
+      chargeLater(this.props, formData, card)
+      return
+    }
+
+    // #6 Pro immediate - new
+    if (!isExistingCustomer) {
+      charge(this.props, formData, card)
+      return
+    }
+
+    // #7 Pro immediate - existing
+    chargeExistingPro(this.props, formData)
+    return
   }
   handleSubmitError = (err) => {
     console.log('Something went wrong while processing payment: ', err)
@@ -521,7 +551,6 @@ export default class App extends Component {
     const subtotalAfterDiscount = subtotal - discount
     const referralCredit = getReferralCredit(this.props, subtotalAfterDiscount)
     const shippingRate = getShippingRate(this.props, shippingMethod)
-    console.log('shippingRate', shippingRate)
     const salesTax = getSalesTax(formData, subtotal, shippingRate)
 
     /**
@@ -553,7 +582,7 @@ export default class App extends Component {
 
         {/* cart summary */}
         <Collapsible
-          trigger="See Cart Summary"
+          trigger="View Cart Summary"
           transitionTime={200}
         >
           <CartSummary
