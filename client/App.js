@@ -37,6 +37,7 @@ import availableCountries from '../modules/locale/available-countries.json'
 import locales from '../modules/locale/locales.json'
 import {showPageLoading, hidePageLoading, showPageLoadingSuccess, hidePageLoadingSuccess} from '../modules/page-loading/core'
 import {
+  checkIsFreeSample,
   checkIsPro,
   getCartItemsWithDetail,
   getDiscount,
@@ -70,16 +71,16 @@ export default class App extends Component {
   static propTypes = {
     ready: PropTypes.bool.isRequired, // required because of async vars; true when all async vars have been set
     rootState: PropTypes.object.isRequired,
-    stripe: PropTypes.object.isRequired,
-    locale: PropTypes.object.isRequired, // {locale, domain, currency, currencySymbol}
-    productDetails: PropTypes.array.isRequired,
-    shippingDetails: PropTypes.array.isRequired,
+    stripe: PropTypes.object.isRequired, // Different for website & POS
+    locale: PropTypes.object.isRequired, // ASYNC; {locale, domain, currency, currencySymbol}
+    productDetails: PropTypes.array.isRequired, // ASYNC
+    shippingDetails: PropTypes.array.isRequired, // ASYNC
     cartItems: PropTypes.object.isRequired, // {627843518167: 1, ...}
-    track: PropTypes.object.isRequired, // Mixpanel, FB pixel
-    countryCode: PropTypes.string,
-    userProfile: PropTypes.object,
-    customer: PropTypes.object,
-    prefill: PropTypes.array, // [{stateId: 'zcoEmailField', value: 'test@test.com'}, ...]
+    track: PropTypes.object.isRequired, // ASYNC; Mixpanel, FB pixel
+    countryCode: PropTypes.string, // ASYNC
+    userProfile: PropTypes.object, // ASYNC; this could be 1) from website or 2) from sales team (i.e. BaseCRM)
+    customer: PropTypes.object, // ASYNC
+    prefill: PropTypes.array, // ASYNC; [{stateId: 'zcoEmailField', value: 'test@test.com'}, ...]
     coupon: PropTypes.object, // {couponId, discount, applyTo, oneTimeUse, type, validUntil}
     updateBilling: PropTypes.bool,
     showCartSummary: PropTypes.bool,
@@ -112,10 +113,6 @@ export default class App extends Component {
     super(props)
   }
 
-  checkIsFreeSample = () => {
-    const {cartItems} = this.props
-    return R.compose(R.contains(SAMPLE_PACK_SKU), R.keys)(cartItems)
-  }
   getCard = () => {
     const {rootState} = this.props
     return getElemState(rootState, STRIPE_CARD_ID)
@@ -384,7 +381,7 @@ export default class App extends Component {
     const formData = this.getFormData()
     // console.log('formData', formData)
     const {paymentMethod = 'cc', paymentTerm = 0} = formData
-    const isFreeSample = this.checkIsFreeSample()
+    const isFreeSample = checkIsFreeSample(this.props)
     const isManualPayment = paymentMethod === 'manual'
     const hasPaymentTerm = paymentTerm !== 0
     const isPro = checkIsPro(this.props)
@@ -518,7 +515,7 @@ export default class App extends Component {
     const {rootState, locale, userProfile, shippingDetails, countryCode, isPos, btnStyle = {}, btnClassName = ''} = this.props
     const {currency, currencySymbol} = locale
     const isPro = checkIsPro(this.props)
-    const isFreeSample = this.checkIsFreeSample()
+    const isFreeSample = checkIsFreeSample(this.props)
     const countryList = this.getCountryList()
     const shippingCountryCode = this.getValue(SHIPPING_ADDRESS_COUNTRY_FIELD_ID)
     const billingCountryCode = this.getValue(BILLING_ADDRESS_COUNTRY_FIELD_ID)
@@ -882,7 +879,7 @@ export default class App extends Component {
           {/* end: shipping methods */}
 
           {/* payment method */}
-          <div className={`form-group ${isFreeSample ? 'display-none' : ''}`}>
+          <div className={`form-group ${isFreeSample || !isPos ? 'display-none' : ''}`}>
             <div className="label">
               <div className="row">
                 <span className="col-xs-3">Pay Method</span>
@@ -903,7 +900,7 @@ export default class App extends Component {
 
           {/* card + payment term */}
           <div className="form-group">
-            <div className={`label ${isFreeSample || paymentMethod === 'manual' ? 'display-none' : ''}`}>
+            <div className={`label ${isFreeSample || !isPos || paymentMethod === 'manual' ? 'display-none' : ''}`}>
               <div className="row">
                 <span className="col-xs-3">{paymentTermLabel}</span>
                 <div className="col-xs-9">

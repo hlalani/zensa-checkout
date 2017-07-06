@@ -11,6 +11,9 @@ export const createScheduledCharge = (scheduledChargeObj) => {
         chargeAttempted
         charged
         created
+        invoiceId
+        amount
+        currency
       }
     }
   `
@@ -32,6 +35,9 @@ export const updateScheduledCharge = (email, scheduledChargeObj) => {
         chargeAttempted
         charged
         created
+        invoiceId
+        amount
+        currency
       }
     }
   `
@@ -53,6 +59,9 @@ export const getScheduledCharges = () => {
       chargeAttempted
       charged
       created
+      invoiceId
+      amount
+      currency
     }
   `
   return axios.post(`${config.apiBase}/graphql`, {

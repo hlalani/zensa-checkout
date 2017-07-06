@@ -31,7 +31,7 @@ export default class CartSummary extends Component {
       total,
     } = this.props
     const {currencySymbol} = locale
-    const discountRate = Math.round(discount / subtotal * 100)
+    const discountRate = subtotal === 0 ? 0 : Math.round(discount / subtotal * 100)
     const AccountLine = ({text, number, subtext, style, numberStyle}) => (
       <div className="flex items-center justify-between px1 mb1" style={style}>
         <div>

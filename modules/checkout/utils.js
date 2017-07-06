@@ -1,4 +1,5 @@
 import R from 'ramda'
+import Rx from 'rx-lite'
 import axios from 'axios'
 import moment from 'moment'
 import {
@@ -6,6 +7,8 @@ import {
   NUMBING_CREAM_30G_SKU,
   RETAIL_VOLUME_DISCOUNT_TABLE,
   REFERRED_CREDIT_RATE,
+  SAMPLE_PACK_SKU,
+  XERO_ACCOUNT_CODES,
 } from '../global/constants'
 import {changeState} from '../state/events'
 import {resetState} from '../state/core'
@@ -31,6 +34,17 @@ import {
   updateProUserReferralCreditInDB$$,
   updateProUserInDB$$,
 } from '../professional-users/observables'
+import {
+  convertToXeroLineItems,
+  convertToXeroName,
+} from '../xero/core'
+import {
+  createOrUpdateXeroContact$$,
+  createXeroInvoice$$,
+  createXeroPayment$$,
+} from '../xero/observables'
+import {createShippingLabels$$} from '../shipment/observables'
+import {getLineItemsWithDimensions} from '../box-packing/core'
 import {sendEmail$$} from '../sendgrid/observables'
 import {hidePageLoading, showPageLoadingSuccess, hidePageLoadingSuccess} from '../page-loading/core'
 
@@ -184,56 +198,16 @@ function getCouponDiscount(cartItemsWithDetail, subtotal, coupon) {
   }
 }
 
-// Returns discount per unit in dollars
-// getProfessionalUnitDiscount :: {*} -> Integer -> Integer -> Integer
-function getProfessionalUnitDiscount(professionalDiscountMap, originalPrice, quantity) {
-  if (R.isNil(professionalDiscountMap)) { return 0 }
-  const prices = R.pluck('price', professionalDiscountMap) // [2500, 2000, 1800]
-  const quantities = R.pluck('quantity', professionalDiscountMap) // [10, 24, 96]
-  const rangeIndex = indexOfRange(quantities, quantity) // 1
-  return rangeIndex <= 0 ? 0 : (originalPrice - R.prop(rangeIndex - 1, prices)) // 3000 (i.e. 5500 - 2500)
-}
-
-function getProVolumeDiscounts(currency, productDetails, cartItemsWithDetail) {
-  if (R.isEmpty(productDetails) || R.isEmpty(cartItemsWithDetail)) { return {} }
-
-  const discounts = R.map(cartItem => {
-    const product = R.find(R.propEq('sku', cartItem.sku))(productDetails)
-    const originalPrice = R.path(['price', currency])(product)
-    const professionalDiscountMap = R.path(['wholesalePriceMap', currency])(product)
-    return getProfessionalUnitDiscount(professionalDiscountMap, originalPrice, cartItem.quantity) * cartItem.quantity
-  })(cartItemsWithDetail)
-
-  return R.reduce((prev, curr) => {
-    const i = R.indexOf(curr, cartItemsWithDetail)
-    return R.merge(prev, {[curr.sku]: R.prop(i, discounts)})
-  }, {})(cartItemsWithDetail) // {sku: discount, sku2: discount2, ...}
-}
-
-function getProVolumeDiscount(proVolumeDiscounts) {
-  if (R.isEmpty(proVolumeDiscounts)) { return 0 }
-  return R.compose(R.sum, R.values)(proVolumeDiscounts)
-}
-
-// getDiscountRate :: Integer -> Integer
-function getDiscountRate(quantity) {
-  return quantity <= 3 ? R.prop(quantity, RETAIL_VOLUME_DISCOUNT_TABLE) : R.compose(R.last, R.values)(RETAIL_VOLUME_DISCOUNT_TABLE) || 0
-}
-
-function getRetailVolumeDiscount(cartItems, productSubtotals) {
-  const discounts = R.mapObjIndexed((quantity, sku) => {
-    const subtotalForSku = R.prop(sku, productSubtotals)
-    const discountForSku = subtotalForSku * (getDiscountRate(quantity) / 100)
-    return discountForSku
-  })(cartItems) // {627843518181: 11000 * 10%, 627843518181: 16500 * 15%, ...}
-  return R.compose(R.sum, R.values)(discounts)
-}
-
 function getStateCode(stateName) {
   return R.prop(stateName, stateList)
 }
 
 /* --- EXPORTED FUNCTIONS --- */
+
+export const checkIsFreeSample = (props) => {
+  const {cartItems} = props
+  return R.compose(R.contains(SAMPLE_PACK_SKU), R.keys)(cartItems)
+}
 
 export const checkIsPro = (props) => {
   const {userProfile, salesTeamUserProfile} = props
@@ -293,13 +267,14 @@ export const getCartItemsWithDetail = (props) => {
       } else {
         // If the buyer does NOT have numbing cream in the cart, add numbing cream
         const numbingCreamProductDetails = R.find(R.propEq('sku', NUMBING_CREAM_30G_SKU))(productDetails)
+        const {sku, name, thumbUrl, price = {}} = numbingCreamProductDetails || {}
 
         return R.append({
-          sku: R.prop('sku', numbingCreamProductDetails),
-          name: R.prop('name', numbingCreamProductDetails),
+          sku,
+          name,
           quantity: 1,
-          price: R.path(['price', currency], numbingCreamProductDetails),
-          thumbUrl: R.prop('thumbUrl', numbingCreamProductDetails),
+          price: R.prop(currency, price),
+          thumbUrl,
         })(cartItemsWithDetail)
       }
     } else {
@@ -329,6 +304,51 @@ export const getSubtotal = (props) => {
   const {locale, productDetails, cartItems} = props
   const productSubtotals = getProductSubtotals(locale, productDetails, cartItems)
   return R.compose(R.sum, R.values)(productSubtotals)
+}
+
+// Returns discount per unit in dollars
+// getProfessionalUnitDiscount :: {*} -> Integer -> Integer -> Integer
+export const getProfessionalUnitDiscount = (professionalDiscountMap, originalPrice, quantity) => {
+  if (R.isNil(professionalDiscountMap)) { return 0 }
+  const prices = R.pluck('price', professionalDiscountMap) // [2500, 2000, 1800]
+  const quantities = R.pluck('quantity', professionalDiscountMap) // [10, 24, 96]
+  const rangeIndex = indexOfRange(quantities, quantity) // 1
+  return rangeIndex <= 0 ? 0 : (originalPrice - R.prop(rangeIndex - 1, prices)) // 3000 (i.e. 5500 - 2500)
+}
+
+export const getProVolumeDiscounts = (currency, productDetails, cartItemsWithDetail) => {
+  if (R.isEmpty(productDetails) || R.isEmpty(cartItemsWithDetail)) { return {} }
+
+  const discounts = R.map(cartItem => {
+    const product = R.find(R.propEq('sku', cartItem.sku))(productDetails)
+    const originalPrice = R.path(['price', currency])(product)
+    const professionalDiscountMap = R.path(['wholesalePriceMap', currency])(product)
+    return getProfessionalUnitDiscount(professionalDiscountMap, originalPrice, cartItem.quantity) * cartItem.quantity
+  })(cartItemsWithDetail)
+
+  return R.reduce((prev, curr) => {
+    const i = R.indexOf(curr, cartItemsWithDetail)
+    return R.merge(prev, {[curr.sku]: R.prop(i, discounts)})
+  }, {})(cartItemsWithDetail) // {sku: discount, sku2: discount2, ...}
+}
+
+export const getProVolumeDiscount = (proVolumeDiscounts) => {
+  if (R.isEmpty(proVolumeDiscounts)) { return 0 }
+  return R.compose(R.sum, R.values)(proVolumeDiscounts)
+}
+
+// getRetailDiscountRate :: Integer -> Integer
+export const getRetailDiscountRate = (quantity) => {
+  return quantity <= 3 ? R.prop(quantity, RETAIL_VOLUME_DISCOUNT_TABLE) : R.compose(R.last, R.values)(RETAIL_VOLUME_DISCOUNT_TABLE) || 0
+}
+
+export const getRetailVolumeDiscount = (cartItems, productSubtotals) => {
+  const discounts = R.mapObjIndexed((quantity, sku) => {
+    const subtotalForSku = R.prop(sku, productSubtotals)
+    const discountForSku = subtotalForSku * (getRetailDiscountRate(quantity) / 100)
+    return discountForSku
+  })(cartItems) // {627843518181: 11000 * 10%, 627843518181: 16500 * 15%, ...}
+  return R.compose(R.sum, R.values)(discounts)
 }
 
 export const getDiscount = (props) => {
@@ -376,7 +396,11 @@ export const getReferralCredit = (props, subtotalAfterDiscount) => {
 export const getShippingOptions = (props) => {
   const {isPos, userProfile, shippingDetails, countryCode} = props
   const isPro = checkIsPro(props)
+  const isFreeSample = checkIsFreeSample(props)
   const isInternational = countryCode !== 'US' && countryCode !== 'CA'
+  if (isFreeSample) {
+    return R.filter(option => R.prop('freeSample', option), shippingDetails)
+  }
   if (isPro) {
     const proShippingOptions = R.filter(option => {
       const nameContainsIntl = R.compose(R.contains('intl'), R.toLower, R.prop('name'))(option)
@@ -389,8 +413,9 @@ export const getShippingOptions = (props) => {
     }
   } else {
     return R.filter(option => {
+      const isRetailShippingOptions = !R.prop('professional', option) && !R.prop('freeSample', option)
       const nameContainsIntl = R.compose(R.contains('intl'), R.toLower, R.prop('name'))(option)
-      return isInternational ? !R.prop('professional', option) && nameContainsIntl : !R.prop('professional', option) && !nameContainsIntl
+      return isInternational ? isRetailShippingOptions && nameContainsIntl : isRetailShippingOptions && !nameContainsIntl
     }, shippingDetails)
   }
 }
@@ -499,31 +524,168 @@ export const getPaymentMethods = () => {
   ]
 }
 
-export const createShipment = (props, formData) => {
-  const {shippingMethod} = formData
+export const createShippingLabels = (props, formData, orderObj) => {
+  const {productDetails} = props
+  const {email, shippingAddress, phone, shippingMethod} = formData
+  const {lineItems} = orderObj
+  const {
+    name,
+    line1: street1,
+    zip,
+    city,
+    state,
+    country,
+  } = shippingAddress
 
   // Do nothing if shipment is manual
   if (shippingMethod === 'professionalManual') { return }
 
-  // Create shipment in Shippo
+  /**
+   * 1) Get the shipping boxes (or parcels in Shippo terms)
+   * 2) Generate shipping label in Shippo
+   */
+  const lineItemsWithDimensions = getLineItemsWithDimensions(productDetails, lineItems)
+  const shippingBoxesPayload = {lineItemsWithDimensions}
 
-
-  // Generate shipping label in Shippo
-
-
+  getShippingBoxes$$(shippingBoxesPayload)
+    .flatMap(packagesRes => {
+      const parcels = R.map(parcel => {
+        const {box, total_weight: weight} = parcel
+        const {
+          length,
+          width,
+          height,
+          dimension_units: distance_unit,
+          weight_units: mass_unit,
+        } = box
+        return {
+          length,
+          width,
+          height,
+          weight,
+          distance_unit,
+          mass_unit,
+        }
+      })(packagesRes)
+      const addressTo = {
+        email,
+        name,
+        street1,
+        zip,
+        city,
+        state,
+        country,
+        phone,
+      }
+      const shipmentPayload = {addressTo, parcels, productDetails, lineItems, shippingMethod}
+      return createShippingLabels$$(shipmentPayload)
+    })
+    .subscribe(
+      transactionRes => console.log('Creating shipping labels successful'),
+      err => console.log('Something went wrong while creating shipping labels', err)
+    )
 }
 
-export const processXero = () => {
-  // Create/update Xero customer
 
+/**
+ * TODO: Problem
+ *    1) What happens if the contact already exist? Will the createXeroContact call fail?
+ * Returns Observable with created Xero invoice obj as a response
+ */
+export const processXero$$ = (props, formData, orderObj) => {
+  const {userProfile} = props
+  const isPro = !R.isNil(userProfile)
+  const {metadata: userProfileMetadata} = userProfile || {}
+  const {fname, lname, businessName} = userProfileMetadata || {}
+  const {email, billingAddress, phone, shippingMethod, paymentTerm} = formData
+  const total = getTotal(props, formData)
+  const {lineItems} = orderObj
+  const {
+    line1,
+    city,
+    state,
+    zip,
+    country,
+  } = billingAddress
+  const xeroName = convertToXeroName(businessName, email)
+  const shippingRate = getShippingRate(props, shippingMethod)
+  const isFreeSample = checkIsFreeSample(props)
+  const hasPaymentTerm = paymentTerm !== 0
+  const dueDate = hasPaymentTerm ?
+    moment().add(paymentTerm, 'day').toDate().toISOString().split("T")[0] :
+    moment().toDate().toISOString().split("T")[0]
+  const {sales: salesAccountCode} = XERO_ACCOUNT_CODES
 
-  // Create Xero invoice
+  /**
+   * 1) Create/update Xero customer
+   * 2) Create Xero invoice
+   * 3) Mark it paid if the charge is immediate (!hasPaymentTerm) and successful
+   * 4) Adjust the price to 1 cent if sample (it'll have price of 0 otherwise)
+   *    -> this will happen inside convertToXeroLineItems()
+   */
+  const contact = {
+    Name: xeroName,
+    FirstName: fname,
+    LastName: lname,
+    EmailAddress: email,
+    Addresses: [
+      {
+        AddressLine1: line1,
+        City: city,
+        Region: state,
+        PostalCode: zip,
+        Country: country,
+      }
+    ],
+    Phones: [
+      {
+        PhoneNumber: phone,
+      }
+    ]
+  }
+  return createOrUpdateXeroContact$$(contact)
+    .flatMap((newContactRes) => {
+      const xeroLineItems = convertToXeroLineItems(props, isFreeSample, isPro, lineItems, shippingRate)
+      const invoice = {
+        Type: 'ACCREC',
+        Status: 'AUTHORISED',
+        Contact: {
+          Name: xeroName,
+        },
+        DueDate: dueDate,
+        LineItems: xeroLineItems,
+      }
+      return createXeroInvoice$$(invoice)
+    })
+    .flatMap((newInvoiceRes) => {
+      /**
+       * Defer payment if there's a payment term - and return invoice obj
+       */
+      if (hasPaymentTerm) {
+        return Rx.Observable.return(newInvoiceRes)
+      } else {
+        // TODO: handle currencyRate for Xero
 
-
-  // Mark it paid if the charge is immediate and successful
-
-
-  // Adjust the price to 1 cent if sample (it'll have price of 0 otherwise)
+        const invoiceId = R.prop('InvoiceID', newInvoiceRes)
+        const payment = {
+          Invoice: {
+            InvoiceID: invoiceId,
+          },
+          Account: {
+            Code: salesAccountCode,
+          },
+          Date: new Date().toISOString().split("T")[0],
+          Amount: (total / 100).toFixed(2).toString(), // Xero requires amount in dollars as String
+          // CurrencyRate: '',
+        }
+        return createXeroPayment$$(payment)
+          .flatMap((res) => {
+            // If payment is successfully created, update invoice to PAID
+            // Returns updated invoice
+            return updateXeroInvoice$$(invoiceId, {Status: 'PAID'})
+          })
+      }
+    })
 }
 
 

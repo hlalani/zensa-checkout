@@ -3,7 +3,7 @@ import R from 'ramda'
 import axios from 'axios'
 import config from '../../client-config'
 
-export const saveProUserToDB$$ = profile => {
+export const saveProfessionalUserToDB$$ = profile => {
   return Rx.Observable.create(observer => {
     axios.post(`${config.apiBase}/api/professional-users`, profile)
       .then(userObj => {
@@ -15,7 +15,7 @@ export const saveProUserToDB$$ = profile => {
   })
 }
 
-export const checkProUserExistsInDB$$ = email => {
+export const checkProfessionalUserExistsInDB$$ = email => {
   const encondedEmail = encodeURIComponent(email)
   return Rx.Observable.create(observer => {
     axios.get(`${config.apiBase}/api/professional-users?userEmail=${encondedEmail}`)
@@ -31,7 +31,7 @@ export const checkProUserExistsInDB$$ = email => {
   })
 }
 
-export const getProUserFromDB$$ = email => {
+export const getProfessionalUserFromDB$$ = email => {
   const encondedEmail = encodeURIComponent(email)
   return Rx.Observable.create(observer => {
     axios.get(`${config.apiBase}/api/professional-users?userEmail=${encondedEmail}`)
@@ -43,7 +43,7 @@ export const getProUserFromDB$$ = email => {
   })
 }
 
-export const deleteProUserInDB$$ = email => {
+export const deleteProfessionalUserInDB$$ = email => {
   const encondedEmail = encodeURIComponent(email)
   return Rx.Observable.create(observer => {
     axios.delete(`${config.apiBase}/api/professional-users?userEmail=${encondedEmail}`)
@@ -55,7 +55,7 @@ export const deleteProUserInDB$$ = email => {
   })
 }
 
-export const updateProUserInDB$$ = (email, updateObj) => {
+export const updateProfessionalUserInDB$$ = (email, updateObj) => {
   const encondedEmail = encodeURIComponent(email)
   return Rx.Observable.create(observer => {
     axios.put(`${config.apiBase}/api/professional-users?userEmail=${encondedEmail}`, updateObj)
@@ -68,7 +68,7 @@ export const updateProUserInDB$$ = (email, updateObj) => {
   })
 }
 
-export const getProUserByReferralCodeFromDB$$ = referralCode => {
+export const getProfessionalUserByReferralCodeFromDB$$ = referralCode => {
   return Rx.Observable.create(observer => {
     axios.get(`${config.apiBase}/api/professional-users/referral/${referralCode}`)
       .then(userObj => {
@@ -126,7 +126,7 @@ export const getAvailableReferralCode$$ = referralCodes => {
   })
 }
 
-export const updateProUserReferralCreditInDB$$ = (email, updateObj) => {
+export const updateProfessionalUserReferralCreditInDB$$ = (email, updateObj) => {
   const encondedEmail = encodeURIComponent(email)
   return Rx.Observable.create(observer => {
     axios.put(`${config.apiBase}/api/professional-users?userEmail=${encondedEmail}&referralCreditUpdate=true`, updateObj)

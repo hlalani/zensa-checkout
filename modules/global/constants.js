@@ -30,8 +30,30 @@ export const MAILCHIMP_PROFESSIONAL_BUYER_LIST_ID = '90e5a8902c'
 export const FREE_SHIPPING_AVAILABLE_COUNTRIES = ['CA', 'US']
 export const FREE_OVERNIGHT_AVAILABLE_COUNTRIES = ['CA', 'US']
 export const NON_INTERNATIONAL_COUNTRIES = ['CA', 'US']
+export const FULFILLMENT_CENTER_ADDRESS = {
+  email: 'info@zensaskincare.com',
+  name: 'Zensa Skincare',
+  line1: '110 - 4268 Lozells Ave',
+  city: 'Burnaby',
+  state: 'BC',
+  zip: 'V5A 0C7',
+  country: 'CA',
+  phone: '604-674-5231',
+}
+export const SHIPPING_BOXES = [
+  {
+    name: 'shipping-box-1',
+    width: 12,
+    height: 12,
+    length: 12,
+    dimension_units: 'inches', // Options: 'inches', 'centimeters', 'feet', 'meters'
+    weight: 0.2,
+    weight_units: 'pounds' // Options: 'grams', 'ounces', 'pounds', 'kilograms'
+  },
+]
 
 // products
+export const XERO_SHIPPING_SKU = '627843518160'
 export const NUMBING_CREAM_30G_SKU = '627843518167'
 export const HEALING_CREAM_237ML_SKU = '627843518174'
 export const HEALING_CREAM_60ML_SKU = '627843518181'
@@ -56,3 +78,16 @@ export const RETAIL_VOLUME_DISCOUNT_TABLE = {
 // referral
 export const REFERRED_CREDIT_RATE = 10 // 10 percent discount off initial purchase if you are referred by someone
 export const REFERRAL_CREDIT_RATE = 10 // 10 percent discount off any purchase if you refer someone
+
+// order
+export const PHARMA_LINE_ITEMS = [
+  NUMBING_CREAM_30G_SKU,
+  HEALING_CREAM_237ML_SKU,
+  HEALING_CREAM_60ML_SKU,
+  HEALING_CREAM_5ML_SKU,
+]
+
+// Xero
+export const XERO_ACCOUNT_CODES = {
+  sales: 200,
+}
