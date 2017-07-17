@@ -37,29 +37,30 @@ export const convertToXeroLineItems = (props, isFreeSample, isPro, lineItems, sh
     /**
      * If the order is a free sample OR the line item is NOT a pharma item, return 1 cent (not 0)
      * Otherwise, return the unitPrice
-     * NOTE: free shipping on sample
      */
     const finalUnitPrice = isFreeSample || !checkIsPharmaLineItem(item) ? 1 : unitPrice
-    const finalShippingRate = isFreeSample ? 0 : shippingRate
 
-    // Divide UnitPrice by 100 since Xero requires amount in dollars in String, not cents in Integer
+    // Xero requires amount in dollars in Float, not cents in Integer
     return {
       Code: sku,
       AccountCode: salesAccountCode,
       Quantity: quantity,
       Name: name,
-      UnitPrice: (finalUnitPrice / 100).toFixed(2).toString()
-      // Description: description,
+      UnitAmount: Math.round(finalUnitPrice) / 100,
+      Description: name,
     }
   }, lineItems)
 
+  //  NOTE: free shipping on sample
+  const finalShippingRate = isFreeSample ? 0 : shippingRate
+
   // Before returning, add shipping as a line item as per Xero docs recommendation
-  return R.merge(xeroLineItems, {
+  return R.append({
     Code: XERO_SHIPPING_SKU,
     AccountCode: salesAccountCode,
     Quantity: 1,
     Name: 'Shipping',
-    UnitPrice: (finalShippingRate / 100).toFixed(2).toString()
-    // Description: description,
-  })
+    UnitAmount: Math.round(finalShippingRate) / 100,
+    Description: 'Shipping',
+  })(xeroLineItems)
 }

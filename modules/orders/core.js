@@ -33,7 +33,7 @@ import {PHARMA_LINE_ITEMS} from '../global/constants'
 
 const log = x => { console.log(x); return x }
 
-export const mergeLineItems = (productDetails, cartItems) => {
+export const getLineItems = (productDetails, cartItems) => {
   const allLineItems = R.compose(R.unnest, R.map(product => {
     // Multiply each lineItem quantity by the order quantity
     const {sku, lineItems} = product
@@ -70,7 +70,7 @@ export const createOrder = (productDetails, cartItems, customer, shipping, shipp
   const {email, name, businessName, phone} = customer
   const skus = R.keys(cartItems)
   const modifiedCartItems = R.compose(R.values, R.mapObjIndexed((quantity, sku, obj) => ({sku, quantity})))(cartItems)
-  const lineItems = mergeLineItems(productDetails, cartItems)
+  const lineItems = getLineItems(productDetails, cartItems)
 
   return {
     email,

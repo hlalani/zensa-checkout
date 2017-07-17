@@ -1,9 +1,9 @@
 import test from 'tape'
 import {
-  mergeLineItems,
+  getLineItems,
 } from './core'
 
-test('mergeLineItems()', assert => {
+test('getLineItems()', assert => {
   const productDetails = [
     {
       sku: '627843518188',
@@ -94,7 +94,7 @@ test('mergeLineItems()', assert => {
     627843518216: 1,
     627843518167: 1,
   }
-  const actual = mergeLineItems(productDetails, cartItemState)
+  const actual = getLineItems(productDetails, cartItemState)
   const expected = [
     {sku: '627843518167', quantity: 6},
     {sku: '627843518230', quantity: 2},
@@ -105,7 +105,7 @@ test('mergeLineItems()', assert => {
   ]
 
   assert.deepEqual(actual, expected,
-    `Given productDetails and cartItemState, mergeLineItems() should return
+    `Given productDetails and cartItemState, getLineItems() should return
     all unique lineItems merged together`)
 
   assert.end()

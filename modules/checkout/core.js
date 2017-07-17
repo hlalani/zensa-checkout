@@ -16,6 +16,7 @@ import {
   OUTCOME_MESSAGE_ID,
 } from '../state/constants'
 import {
+  checkIsExistingCustomer,
   getCartItemsWithDetail,
   getProductContent,
   getTotalQuantity,
@@ -39,6 +40,7 @@ import {subscribeNewMember$$, deleteMember$$} from '../mailchimp/observables'
 import {createOrder} from '../orders/core'
 import {saveOrder} from '../orders/graphql'
 import {createScheduledCharge} from '../scheduled-charges/graphql'
+import {hidePageLoading} from '../page-loading/core'
 
 /**
  * 1) If updateBilling === true, run updateBilling().
@@ -251,7 +253,7 @@ function handleProStripeTokenSuccess(token, props, formData) {
   createCustomerAndCharge$$(tokenObj, stripeAddress, stripeMetadata, stripeOptions).subscribe(
     chargeData => {
       console.log('Creating customer and card charge successful!', chargeData)
-      handleProChargeSuccess(props, chargeData)
+      handleProChargeSuccess(props, formData, chargeData)
     },
     err => {
       const error = {
@@ -263,7 +265,7 @@ function handleProStripeTokenSuccess(token, props, formData) {
   )
 }
 
-function handleProChargeSuccess(props, chargeData) {
+function handleProChargeSuccess(props, formData, chargeData) {
   const {receipt_email: email, metadata: chargeMetadata, amount} = chargeData
   const {name, phone, business_name, line1, postal_code, city, state, country, shipping_method} = chargeMetadata
   const {
@@ -285,12 +287,13 @@ function handleProChargeSuccess(props, chargeData) {
   track.professionalPurchase(email, currency, cartItemsWithDetail)
 
   // Handle referral business
-  handleReferral(props)
+  handleReferral(props, formData)
 
   // Subscribe the user to the email list (MailChimp) if they opted in
   // Don't run if customer already exists (since they're already in the buyer list)
-  // For now, only add to email list if not POS
-  if (addToEmailList && R.isNil(customer) && !isPos) {
+  // TODO: For now, only add to email list if not POS
+  const isExistingCustomer = checkIsExistingCustomer(props)
+  if (addToEmailList && !isExistingCustomer && !isPos) {
     const {businessName, fname, lname} = R.prop('metadata', userProfile) || {}
     const mailchimpPayload = {
       email_address: email,
@@ -446,7 +449,7 @@ function handleCreateCustomerSuccess(props, formData, customerObj) {
   const {email, metadata: userProfileMetadata} = userProfile
   const {businessName, fname, lname} = userProfileMetadata
   const {new: isNewCustomer} = customerMetadata
-  const {shippingAddress, paymentTerm} = formData
+  const {shippingAddress, paymentTerm, shippingMethod} = formData
   const {line1, zip, city, state, country} = shippingAddress
   const isScheduledCharge = !R.equals(paymentTerm, 0) && !R.isNil(paymentTerm)
 
@@ -491,7 +494,7 @@ function handleCreateCustomerSuccess(props, formData, customerObj) {
     track.professionalPurchase(email, currency, cartItemsWithDetail)
 
     // Handle referral business
-    handleReferral(props)
+    handleReferral(props, formData)
 
     // Subscribe the user to the email list (MailChimp) if they opted in
     // Don't run if customer already exists (since they're already in the buyer list)
@@ -592,6 +595,7 @@ function handleCreateCustomerSuccess(props, formData, customerObj) {
     // handle post scheduled charge clean up
     onScheduledChargeSuccess(customerObj)
   } else {
+    // NOT a scheduled charge or new customer, so just charge
     // handle post create customer clean up
     onCreateCustomerSuccess(customerObj)
   }
@@ -611,12 +615,14 @@ export const handleStripeError = (err) => {
   console.log('handleStripeError', err)
   if (!R.isNil(err.message)) {
     changeState(OUTCOME_MESSAGE_ID, {msg: err.message, type: 'error', visible: true})
+    hidePageLoading()
   } else {
     changeState(OUTCOME_MESSAGE_ID, {msg: 'Something went wrong. Please try again or contact support.', type: 'error', visible: true})
+    hidePageLoading()
   }
 }
 
-export const handleStripeOutcome = (result, props = {}, formData) => {
+export const handleStripeOutcome = (result, props = {}, formData = {}) => {
   changeState(OUTCOME_MESSAGE_ID, {visible: false})
 
   const {userProfile, updateBilling} = props
@@ -637,6 +643,7 @@ export const handleStripeOutcome = (result, props = {}, formData) => {
           // Charge later
           handleCreateCustomerStripeTokenSuccess(result.token, props, formData)
         } else {
+          // Charge now
           handleProStripeTokenSuccess(result.token, props, formData)
         }
       } else {
@@ -684,6 +691,7 @@ export const charge = (props, formData, card) => {
     .then(result => handleStripeOutcome(result, props, formData))
 }
 
+/* DEPRECATED: No need - just use charge with prefilled fields
 export const chargeExistingPro = (props, formData) => {
   const {customer, userProfile, locale, coupon, shippingDetails, countryCode} = props
   const {couponId = 'None'} = coupon
@@ -720,7 +728,7 @@ export const chargeExistingPro = (props, formData) => {
     .subscribe(
       chargeData => {
         // console.log('Charge successful!', chargeData)
-        handleProChargeSuccess(props, chargeData)
+        handleProChargeSuccess(props, formData, chargeData)
       },
       err => {
         console.log('Something went wrong while charging the order', err)
@@ -728,6 +736,7 @@ export const chargeExistingPro = (props, formData) => {
       }
     )
 }
+*/
 
 /**
  * UPDATE BILLING
@@ -869,6 +878,7 @@ export const processSample = (props, formData) => {
     }
   } else {
     // THIS IS MANUAL CHARGE CASE
+    // NO NEED TO TRACK (BASE CRM DOES), OR EMAIL TO FULFILLMENT OR ADD TO MAILCHIMP
     /*
     const total = getTotal(props, formData)
 

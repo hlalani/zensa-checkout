@@ -24,3 +24,4 @@ export const SHIPPING_METHOD_ID = 'zcoShippingMethod'
 export const PAYMENT_METHOD_FIELD_ID = 'zcoPaymentMethod'
 export const PAYMENT_TERM_FIELD_ID = 'zcoPaymentTerm'
 export const PAY_BUTTON_ID = 'zcoPayButton'
+export const SALES_TAX_ID = 'zcoSalesTax' // NOTE: This is technically not formData, but included for convenience

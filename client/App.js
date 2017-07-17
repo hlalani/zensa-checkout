@@ -32,6 +32,7 @@ import {
   ADDRESS_TOGGLE_ID,
   PAY_BUTTON_ID,
   OUTCOME_MESSAGE_ID,
+  SALES_TAX_ID,
 } from '../modules/state/constants'
 import availableCountries from '../modules/locale/available-countries.json'
 import locales from '../modules/locale/locales.json'
@@ -39,11 +40,12 @@ import {showPageLoading, hidePageLoading, showPageLoadingSuccess, hidePageLoadin
 import {
   checkIsFreeSample,
   checkIsPro,
+  checkIsExistingCustomer,
   getCartItemsWithDetail,
   getDiscount,
   getReferralCredit,
   getSubtotal,
-  getSalesTax,
+  getSalesTax$$,
   getShippingOptions,
   getShippingRate,
   getTotal,
@@ -78,8 +80,8 @@ export default class App extends Component {
     cartItems: PropTypes.object.isRequired, // {627843518167: 1, ...}
     track: PropTypes.object.isRequired, // ASYNC; Mixpanel, FB pixel
     countryCode: PropTypes.string, // ASYNC
-    userProfile: PropTypes.object, // ASYNC; this could be 1) from website or 2) from sales team (i.e. BaseCRM)
-    customer: PropTypes.object, // ASYNC
+    userProfile: PropTypes.object, // ASYNC; required if customer exists; this could be 1) from website or 2) from sales team (i.e. BaseCRM)
+    customer: PropTypes.object, // ASYNC; only for pro users - retail users must put in the info again
     prefill: PropTypes.array, // ASYNC; [{stateId: 'zcoEmailField', value: 'test@test.com'}, ...]
     coupon: PropTypes.object, // {couponId, discount, applyTo, oneTimeUse, type, validUntil}
     updateBilling: PropTypes.bool,
@@ -229,6 +231,7 @@ export default class App extends Component {
       shippingMethod: this.getValue(SHIPPING_METHOD_ID),
       paymentMethod: this.getValue(PAYMENT_METHOD_ID),
       paymentTerm: this.getValue(PAYMENT_TERM_FIELD_ID),
+      salesTax: this.getValue(SALES_TAX_ID) // NOTE: This is technically not formData, but included for convenience
     }
   }
   lookUpState = (stateId) => {
@@ -375,8 +378,8 @@ export default class App extends Component {
      *    3) Retail (charge())
      *    4) Pro manual (chargeManual())
      *    5) Pro with payment term (chargeLater())
-     *    6) Pro immediate - new (charge())
-     *    7) Pro immediate - existing (chargeExistingPro())
+     *    6) Pro immediate
+     *    7) DEPRECATED (just use same flow as #6): Pro immediate - existing (chargeExistingPro())
      */
     const formData = this.getFormData()
     // console.log('formData', formData)
@@ -385,7 +388,7 @@ export default class App extends Component {
     const isManualPayment = paymentMethod === 'manual'
     const hasPaymentTerm = paymentTerm !== 0
     const isPro = checkIsPro(this.props)
-    const isExistingCustomer = !R.isNil(customer)
+    const isExistingCustomer = checkIsExistingCustomer(this.props)
 
     // #1 process sample
     if (isFreeSample) {
@@ -423,8 +426,8 @@ export default class App extends Component {
       return
     }
 
-    // #7 Pro immediate - existing
-    chargeExistingPro(this.props, formData)
+    // // #7 Pro immediate - existing
+    // chargeExistingPro(this.props, formData)
     return
   }
   handleSubmitError = (err) => {
@@ -441,10 +444,32 @@ export default class App extends Component {
 
     // Initialize async states when ready goes from false to true
     if (!prevProps.ready && ready) {
+      console.log('ready ran')
       const shippingOptions = getShippingOptions(this.props)
 
       // Initialize shippingMethod
-      changeState(SHIPPING_METHOD_ID, {value: R.path([0, 'name'], shippingOptions)})
+      const shippingMethod = R.path([0, 'name'], shippingOptions)
+      changeState(SHIPPING_METHOD_ID, {value: shippingMethod})
+
+      // Initialize sales tax based on shipping address if prefilled
+      // If not prefilled, set it to 0 for now and update when shipping address is filled in, calculate it
+      const isExistingCustomer = checkIsExistingCustomer(this.props)
+      if (isExistingCustomer) {
+        const {customer} = this.props
+        const {shipping} = customer
+        const {address: customerShippingAddress} = shipping
+        const shippingRate = getShippingRate(this.props, shippingMethod)
+        const taxShippingData = {shippingAddress: customerShippingAddress}
+        getSalesTax$$(this.props, taxShippingData, shippingRate).subscribe(
+          taxObj => {
+            const {amount_to_collect} = taxObj
+            changeState(SALES_TAX_ID, {value: amount_to_collect})
+          },
+          err => console.log('Something went wrong while retrieving sales tax', err)
+        )
+      } else {
+        changeState(SALES_TAX_ID, {value: 0})
+      }
 
       // Initialize country
       changeState(SHIPPING_ADDRESS_COUNTRY_FIELD_ID, {value: countryCode, label: R.prop(countryCode, availableCountries)})
@@ -454,20 +479,31 @@ export default class App extends Component {
   componentDidMount() {
     // Create Stripe Card Element and save on state
     const defaultCardStyle = {
-      iconColor: '#666EE8',
-      color: '#31325F',
-      height: '44px',
-      lineHeight: '44px',
-      fontWeight: 300,
-      fontFamily: 'Roboto, sans-serif',
-      fontSize: '1rem',
-      '::placeholder': {
-        color: '#CFD7E0',
-      },
+      base: {
+        iconColor: '#666EE8',
+        color: '#31325F',
+        height: '44px',
+        lineHeight: '44px',
+        fontWeight: 300,
+        fontFamily: 'Roboto, sans-serif',
+        fontSize: '1rem',
+        '::placeholder': {
+          color: '#CFD7E0',
+        },
+      }
     }
     const {cardStyle = defaultCardStyle, stripe} = this.props
-    const elements = stripe.elements()
-    const card = elements.create('card', {hidePostalCode: true, style: {base: cardStyle}})
+    const elements = stripe.elements({
+      fonts: [
+        {
+          family: 'Roboto',
+          weight: 300,
+          src: "local('Roboto Light'), local('Roboto-Light'), url(https://fonts.gstatic.com/s/roboto/v16/Hgo13k-tfSpn0qi1SFdUfZBw1xU1rKptJj_0jans920.woff2) format('woff2')",
+          unicodeRange: 'U+0000-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2212, U+2215',
+        },
+      ],
+    })
+    const card = elements.create('card', {hidePostalCode: true, style: cardStyle})
     changeState(STRIPE_CARD_ID, card)
 
     // Attach Stripe Card Element
@@ -488,7 +524,40 @@ export default class App extends Component {
     changeState(PAYMENT_METHOD_ID, {value: 'cc'})
     changeState(PAYMENT_TERM_FIELD_ID, {value: 0})
 
+    // Prefill fields for existing customers
+    const isExistingCustomer = checkIsExistingCustomer(this.props)
+    if (isExistingCustomer) {
+      const {customer} = this.props
+      const {email, id: customerId, shipping, sources} = customer
+      const {name: shippingName, phone, address: customerShippingAddress} = shipping
+      const {
+        city: shippingAddressCity,
+        line1: shippingAddressLine1,
+        postal_code: shippingAddressZip,
+      } = customerShippingAddress
+      const customerBillingAdress = R.compose(R.head, R.prop('data'))(sources)
+      const {
+        name: billingName,
+        address_city: billingAddressCity,
+        address_line1: billingAddressLine1,
+        address_zip: billingAddressZip,
+      } = customerBillingAdress
+      const name = R.defaultTo(billingName, shippingName)
+      changeState(SAME_SHIPPING_BILLING_CHECKBOX_ID, {value: false})
+      changeState(EMAIL_FIELD_ID, {value: email, valid: true, touched: true})
+      changeState(SHIPPING_ADDRESS_NAME_FIELD_ID, {value: name, valid: true, touched: true})
+      changeState(SHIPPING_ADDRESS_LINE1_FIELD_ID, {value: shippingAddressLine1, valid: true, touched: true})
+      changeState(SHIPPING_ADDRESS_ZIP_FIELD_ID, {value: shippingAddressZip, valid: true, touched: true})
+      changeState(SHIPPING_ADDRESS_CITY_FIELD_ID, {value: shippingAddressCity, valid: true, touched: true})
+      changeState(BILLING_ADDRESS_NAME_FIELD_ID, {value: name, valid: true, touched: true})
+      changeState(BILLING_ADDRESS_LINE1_FIELD_ID, {value: billingAddressLine1, valid: true, touched: true})
+      changeState(BILLING_ADDRESS_ZIP_FIELD_ID, {value: billingAddressZip, valid: true, touched: true})
+      changeState(BILLING_ADDRESS_CITY_FIELD_ID, {value: billingAddressCity, valid: true, touched: true})
+      changeState(PHONE_FIELD_ID, {value: phone, valid: true, touched: true})
+    }
+
     // Prefill fields with given values and set it to valid+touched (i.e. assume all prefill values are valid)
+    // Comes after existing customer prefill - prefill prop should be able to override it
     const {prefill} = this.props
     R.forEach(({stateId, value}) => {
       changeState(stateId, {value, valid: true, touched: true})
@@ -548,7 +617,7 @@ export default class App extends Component {
     const subtotalAfterDiscount = subtotal - discount
     const referralCredit = getReferralCredit(this.props, subtotalAfterDiscount)
     const shippingRate = getShippingRate(this.props, shippingMethod)
-    const salesTax = getSalesTax(formData, subtotal, shippingRate)
+    const salesTax = this.getValue(SALES_TAX_ID) || 0
 
     /**
      * If isPos is true, then:

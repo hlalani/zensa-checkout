@@ -75,7 +75,7 @@ export default class CartSummary extends Component {
         </div>
 
         <div className="border-top pt1" style={{borderColor: 'rgb(222, 229, 236)'}}>
-          <AccountLine text={'Sales Tax*'} number={shippingRate} subtext={'*Will update based on your shipping address'}/>
+          <AccountLine text={'Sales Tax*'} number={salesTax} subtext={'*Will be added based on your shipping address'}/>
         </div>
 
         <div className="border-top pt1" style={{borderColor: 'rgb(222, 229, 236)'}}>

@@ -1,6 +1,7 @@
 import config from '../../client-config'
 import axios from 'axios'
 import Rx from 'rx-lite'
+import R from 'ramda'
 
 export const getXeroContacts$ = Rx.Observable.create(observer => {
   axios.get(`${config.apiBase}/api/xero/contacts`)
@@ -67,12 +68,14 @@ export const createOrUpdateXeroContact$$ = (contact) => {
   const {EmailAddress: email} = contact
   return getXeroContactByEmail$$(email)
     .flatMap((contactRes) => {
-      if (R.isNil(contactRes)) {
+      if (R.isNil(contactRes) || R.isEmpty(contactRes)) {
         // This means the contact is not found
+        console.log('new xero contact', contact)
         return createXeroContact$$(contact)
       } else {
         // Contact already exists
-        const {ContactId: contactId} = contactRes
+        console.log('existing xero contact', contactRes)
+        const {ContactID: contactId} = contactRes
         return updateXeroContact$$(contactId, contact)
       }
     })

@@ -30,9 +30,9 @@ import {
   PAY_BUTTON_ID,
 } from '../state/constants'
 import {
-  getProUserByReferralCodeFromDB$$,
-  updateProUserReferralCreditInDB$$,
-  updateProUserInDB$$,
+  getProfessionalUserByReferralCodeFromDB$$,
+  updateProfessionalUserReferralCreditInDB$$,
+  updateProfessionalUserInDB$$,
 } from '../professional-users/observables'
 import {
   convertToXeroLineItems,
@@ -42,11 +42,16 @@ import {
   createOrUpdateXeroContact$$,
   createXeroInvoice$$,
   createXeroPayment$$,
+  updateXeroInvoice$$,
 } from '../xero/observables'
 import {createShippingLabels$$} from '../shipment/observables'
+import {getShippingBoxes$$} from '../box-packing/observables'
 import {getLineItemsWithDimensions} from '../box-packing/core'
 import {sendEmail$$} from '../sendgrid/observables'
 import {hidePageLoading, showPageLoadingSuccess, hidePageLoadingSuccess} from '../page-loading/core'
+import {getLineItems} from '../orders/core'
+import {convertToTaxLineItems} from '../sales-tax/core'
+import {calcSalesTax$$} from '../sales-tax/observables'
 
 /**
  * GENERAL UTILITY FUNCTIONS
@@ -161,9 +166,9 @@ function addReferralCredit(userProfile, referralTotal, referrerEmail) {
       }
     }
   }
-  updateProUserReferralCreditInDB$$(referrerEmail, payload).subscribe(
-    dbRes => console.log('updateProUserReferralCreditInDB$$ successful', dbRes),
-    err => console.log('Something went wrong while running updateProUserReferralCreditInDB$$', err)
+  updateProfessionalUserReferralCreditInDB$$(referrerEmail, payload).subscribe(
+    dbRes => console.log('updateProfessionalUserReferralCreditInDB$$ successful', dbRes),
+    err => console.log('Something went wrong while running updateProfessionalUserReferralCreditInDB$$', err)
   )
 }
 
@@ -210,8 +215,12 @@ export const checkIsFreeSample = (props) => {
 }
 
 export const checkIsPro = (props) => {
-  const {userProfile, salesTeamUserProfile} = props
-  return !R.isNil(userProfile) || !R.isNil(salesTeamUserProfile)
+  const {userProfile} = props
+  return !R.isNil(userProfile)
+}
+export const checkIsExistingCustomer = (props) => {
+  const {customer} = props
+  return !R.isNil(customer)
 }
 
 // getCartItemsWithDetail :: {*} -> {*} -> [{*}]
@@ -437,10 +446,9 @@ export const getShippingRate = (props, shippingMethod) => {
 }
 
 export const getTotal = (props, formData) => {
-  const {shippingMethod} = formData
+  const {salesTax, shippingMethod} = formData
   const subtotal = getSubtotal(props)
   const shippingRate = getShippingRate(props, shippingMethod)
-  const salesTax = getSalesTax(formData, subtotal, shippingRate)
   const discount = getDiscount(props)
   const subtotalAfterDiscount = subtotal - discount
   const referralCredit = getReferralCredit(props, subtotalAfterDiscount)
@@ -466,25 +474,34 @@ export const getStateFromFullAddress$$ = (fullAddress) => {
     })
 }
 
-export const getSalesTax = (formData, subtotal,shortppingRate) => {
-  const {billingAddress} = formData
-  const {zip, state, country} = billingAddress
-  return 0
+export const getSalesTax$$ = (props, formData, shippingRate) => {
+  const {cartItems, productDetails} = props
+  const {shippingAddress} = formData
+  const isFreeSample = checkIsFreeSample(props)
+  const isPro = checkIsPro(props)
+  const subtotal = getSubtotal(props)
+  const lineItems = getLineItems(productDetails, cartItems)
+  const taxLineItems = convertToTaxLineItems(props, isFreeSample, isPro, lineItems)
+  return calcSalesTax$$(shippingAddress, subtotal, shippingRate, taxLineItems)
 }
 
-export const handleReferral = (props) => {
+export const handleReferral = (props, formData) => {
   const {userProfile, customer} = props
-  const total = getTotal(props, shippingMethod)
+  const {email} = userProfile
+  const total = getTotal(props, formData)
+  const isExistingCustomer = checkIsExistingCustomer(props)
 
-  if (R.isNil(customer)) {
-    // If referred_by is present, then add credit to the referrer account
-    // This part only applies to initial checkout since credit is accrued to the referrer on initial purchase ONLY
+  if (!isExistingCustomer) {
+    /**
+     * If referred_by is present, then add credit to the referrer account.
+     * This part only applies to initial checkout (i.e. not existing customer)
+     * since credit is accrued to the referrer on initial purchase ONLY.
+     */
     const referralTotal = total // we're basing the referrer base total off of total payment of the buyer
     const referredBySomeone = R.compose(R.not, R.either(R.isEmpty, R.isNil), R.prop('referred_by'))(userProfile)
-
     if (referredBySomeone) {
       const referrerReferralCode = R.prop('referred_by')(userProfile)
-      getProUserByReferralCodeFromDB$$(referrerReferralCode)
+      getProfessionalUserByReferralCodeFromDB$$(referrerReferralCode)
         .subscribe(
           referrerUserProfile => {
             const referrerEmail = R.prop('email')(referrerUserProfile)
@@ -504,7 +521,7 @@ export const handleReferral = (props) => {
       }
     }
   }
-  updateProUserInDB$$(email, referralCreditResetPayload).subscribe(
+  updateProfessionalUserInDB$$(email, referralCreditResetPayload).subscribe(
     dbRes => console.log('Successfully reset referral credit to zero', dbRes),
     err => console.log('Something went wrong while resetting referral credit', err)
   )
@@ -555,16 +572,14 @@ export const createShippingLabels = (props, formData, orderObj) => {
           length,
           width,
           height,
-          dimension_units: distance_unit,
-          weight_units: mass_unit,
         } = box
         return {
-          length,
-          width,
-          height,
-          weight,
-          distance_unit,
-          mass_unit,
+          length: length.toString(),
+          width: width.toString(),
+          height: height.toString(),
+          weight: weight.toString(),
+          distance_unit: 'in',
+          mass_unit: 'lb',
         }
       })(packagesRes)
       const addressTo = {
@@ -586,10 +601,7 @@ export const createShippingLabels = (props, formData, orderObj) => {
     )
 }
 
-
 /**
- * TODO: Problem
- *    1) What happens if the contact already exist? Will the createXeroContact call fail?
  * Returns Observable with created Xero invoice obj as a response
  */
 export const processXero$$ = (props, formData, orderObj) => {
@@ -597,7 +609,7 @@ export const processXero$$ = (props, formData, orderObj) => {
   const isPro = !R.isNil(userProfile)
   const {metadata: userProfileMetadata} = userProfile || {}
   const {fname, lname, businessName} = userProfileMetadata || {}
-  const {email, billingAddress, phone, shippingMethod, paymentTerm} = formData
+  const {email, shippingAddress, phone, shippingMethod, paymentTerm} = formData
   const total = getTotal(props, formData)
   const {lineItems} = orderObj
   const {
@@ -606,7 +618,7 @@ export const processXero$$ = (props, formData, orderObj) => {
     state,
     zip,
     country,
-  } = billingAddress
+  } = shippingAddress
   const xeroName = convertToXeroName(businessName, email)
   const shippingRate = getShippingRate(props, shippingMethod)
   const isFreeSample = checkIsFreeSample(props)

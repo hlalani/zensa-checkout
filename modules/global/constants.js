@@ -40,15 +40,56 @@ export const FULFILLMENT_CENTER_ADDRESS = {
   country: 'CA',
   phone: '604-674-5231',
 }
+
+/**
+ * dimension_units: 'inches', 'centimeters', 'feet', 'meters'
+ * weight_units: 'grams', 'ounces', 'pounds', 'kilograms'
+ */
 export const SHIPPING_BOXES = [
   {
     name: 'shipping-box-1',
-    width: 12,
-    height: 12,
-    length: 12,
-    dimension_units: 'inches', // Options: 'inches', 'centimeters', 'feet', 'meters'
+    length: 6,
+    width: 6,
+    height: 2,
+    dimension_units: 'inches',
     weight: 0.2,
-    weight_units: 'pounds' // Options: 'grams', 'ounces', 'pounds', 'kilograms'
+    weight_units: 'pounds',
+  },
+  {
+    name: 'shipping-box-2',
+    length: 8.7,
+    width: 5.8,
+    height: 5.8,
+    dimension_units: 'inches',
+    weight: 0.2,
+    weight_units: 'pounds',
+  },
+  {
+    name: 'shipping-box-3',
+    length: 12,
+    width: 9,
+    height: 3.8,
+    dimension_units: 'inches',
+    weight: 0.2,
+    weight_units: 'pounds',
+  },
+  {
+    name: 'shipping-box-4',
+    length: 21.7,
+    width: 11.6,
+    height: 9.6,
+    dimension_units: 'inches',
+    weight: 0.2,
+    weight_units: 'pounds',
+  },
+  {
+    name: 'shipping-box-5',
+    length: 13.4,
+    width: 13.4,
+    height: 13.4,
+    dimension_units: 'inches',
+    weight: 0.2,
+    weight_units: 'pounds',
   },
 ]
 
@@ -90,4 +131,12 @@ export const PHARMA_LINE_ITEMS = [
 // Xero
 export const XERO_ACCOUNT_CODES = {
   sales: 200,
+  cashCad: 10100,
+  cashUsd: 10400,
+}
+
+// Sales tax
+export const PRODUCT_TAX_CODE = {
+  pharma: 51010,
+  other: 99999,
 }
