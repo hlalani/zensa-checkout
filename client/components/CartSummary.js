@@ -10,9 +10,8 @@ export default class CartSummary extends Component {
     subtotal: PropTypes.number.isRequired,
     discount: PropTypes.number.isRequired,
     referralCredit: PropTypes.number.isRequired,
-    salesTax: PropTypes.number.isRequired,
     shippingRate: PropTypes.number.isRequired,
-    total: PropTypes.number.isRequired,
+    totalBeforeTax: PropTypes.number.isRequired,
   }
 
   constructor(props) {
@@ -26,9 +25,8 @@ export default class CartSummary extends Component {
       subtotal,
       discount,
       referralCredit,
-      salesTax,
       shippingRate,
-      total,
+      totalBeforeTax,
     } = this.props
     const {currencySymbol} = locale
     const discountRate = subtotal === 0 ? 0 : Math.round(discount / subtotal * 100)
@@ -38,7 +36,7 @@ export default class CartSummary extends Component {
           <div>{text}</div>
           <div className="gray italic h6" style={{display: R.isNil(subtext) ? 'none' : 'block'}}>{subtext}</div>
         </div>
-        <div className="normal" style={numberStyle}>{convertToCurrency(currencySymbol, number)}</div>
+        <div className="normal" style={numberStyle}>{number !== null ? convertToCurrency(currencySymbol, number) : ''}</div>
       </div>
     )
 
@@ -75,11 +73,11 @@ export default class CartSummary extends Component {
         </div>
 
         <div className="border-top pt1" style={{borderColor: 'rgb(222, 229, 236)'}}>
-          <AccountLine text={'Sales Tax*'} number={salesTax} subtext={'*Will be added based on your shipping address'}/>
+          <AccountLine text={'Sales Tax*'} number={null} subtext={'*Will be added based on your shipping address'}/>
         </div>
 
         <div className="border-top pt1" style={{borderColor: 'rgb(222, 229, 236)'}}>
-          <AccountLine text={'Total'} number={total} style={{marginBottom: '0px', fontWeight: '500'}} numberStyle={{fontWeight: '500'}}/>
+          <AccountLine text={'Total'} number={totalBeforeTax} style={{marginBottom: '0px', fontWeight: '500'}} numberStyle={{fontWeight: '500'}}/>
         </div>
         {/* end: numbers */}
       </div>

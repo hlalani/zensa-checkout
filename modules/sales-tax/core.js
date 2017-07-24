@@ -9,7 +9,8 @@ import {
 import {checkIsPharmaLineItem} from '../orders/core'
 
 export const convertToTaxLineItems = (props, isFreeSample, isPro, lineItems) => {
-  const {productDetails} = props
+  const {productDetails, locale} = props
+  const {currency} = locale
   return R.map(item => {
     const {sku, quantity} = item
     const {pharma: pharmaProductTaxCode, other: otherProductTaxCode} = PRODUCT_TAX_CODE
@@ -24,7 +25,7 @@ export const convertToTaxLineItems = (props, isFreeSample, isPro, lineItems) => 
     const proUnitPrice = originalPrice - proUnitDiscount
 
     // Calculate the retail unit price using retail volume discount
-    const retailUnitDiscount = getRetailDiscountRate(quantity) * originalPrice
+    const retailUnitDiscount = (getRetailDiscountRate(quantity) / 100) * originalPrice
     const retailUnitPrice = originalPrice - retailUnitDiscount
 
     const unitPrice = isPro ? proUnitPrice : retailUnitPrice

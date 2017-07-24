@@ -14,11 +14,10 @@ import {state$} from '../modules/state/observables'
 import {changeState} from '../modules/state/events'
 import {getElemState} from '../modules/state/core'
 import {runCustomEventsPolyfill} from '../modules/polyfill/custom-events'
-import localeObj from '../modules/locale/locales.json'
 
 import '../assets/styles/main.css'
 
-import App from './App'
+import TestCases from './TestCases'
 
 runCustomEventsPolyfill()
 
@@ -44,11 +43,6 @@ getShippingDetails$.subscribe(shippingDetails => changeState('shippingDetailsDem
 getProductDetails$.subscribe(productDetails => changeState('productDetailsDemoState', productDetails))
 
 const stripeInstance = window.Stripe('pk_test_dzjZAkQ63whoQXIxplDnt77W')
-const countryCode = 'CA'
-const locale = R.prop('en-CA', localeObj)
-const cartItems = {
-  [MICROBLADING_PACK_SKU]: 2,
-}
 const track = {
   checkout: () => {},
   purchase: () => {},
@@ -57,50 +51,6 @@ const track = {
   professionalAddBilling: () => {},
   professionalChargeScheduled: () => {},
 }
-const prefill = [
-  {
-    stateId: 'zcoEmailField',
-    value: 'seunggs@gmail.com',
-  },
-  {
-    stateId: 'zcoShippingAddressNameField',
-    value: 'Seungchan Lee',
-  },
-  {
-    stateId: 'zcoShippingAddressLine1Field',
-    value: '1415 - 938 Smithe St',
-  },
-  {
-    stateId: 'zcoShippingAddressZipField',
-    value: 'V6Z3H8',
-  },
-  {
-    stateId: 'zcoShippingAddressCityField',
-    value: 'Vancouver',
-  },
-  {
-    stateId: 'zcoPhoneField',
-    value: '123-456-7890',
-  },
-]
-const userProfile = {
-  "created_at": "2017-03-21T04:40:26.655Z",
-  "email": "seunggs@gmail.com",
-  "metadata": {
-    "businessName": "Test",
-    "businessWebsite": "Test",
-    "fname": "Seungchan",
-    "freeSampleAlreadySent": true,
-    "lname": "Lee",
-    "professional": true,
-    "referral": {
-      "credit": 0
-    },
-    "story": "Test"
-  },
-  "referralCode": "SLEE",
-  "referred_by": "",
-}
 
 state$.subscribe(
   rootState => {
@@ -108,29 +58,17 @@ state$.subscribe(
     const productDetails = R.isEmpty(productDetailsState) ? [] : productDetailsState
     const shippingDetailsState = getElemState(rootState, 'shippingDetailsDemoState')
     const shippingDetails = R.isEmpty(shippingDetailsState) ? [] : shippingDetailsState
-    const ready = !R.isEmpty(productDetails) && !R.isEmpty(shippingDetails) ? true : false
 
     render(
-      <App
-        ready={ready}
+      <TestCases
         rootState={rootState}
         stripe={stripeInstance}
-        locale={locale}
         track={track}
-        prefill={prefill}
-        userProfile={userProfile}
-        countryCode={countryCode}
         productDetails={productDetails}
         shippingDetails={shippingDetails}
-        cartItems={cartItems}
-        onChargeSuccess={() => {console.log('onChargeSuccess ran!')}}
-        onCreateCustomerSuccess={() => {console.log('onCreateCustomerSuccess ran!')}}
-        isPos={true}
       />, document.getElementById('app')
     )
   }
 )
 
 changeState('global', {})
-
-export default App

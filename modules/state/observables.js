@@ -14,11 +14,17 @@ export const state$ = Rx.Observable.fromEvent(window.document, 'zensaCheckoutSta
   .map(e => e.detail)
   .scan(R.mergeWith(R.merge), {}) // Instead of simple R.merge to accommodate for multiple event handlers within the same id
   .distinctUntilChanged()
+  // .map(rootState => {
+  //   // Notify of state change completion
+  //   const changeStateCompletedEvent = new window.CustomEvent('zensaCheckoutState:changeCompleted', {detail: rootState})
+  //   window.document.dispatchEvent(changeStateCompletedEvent)
+  //   return rootState
+  // })
 
 // runs subscribe only if the given state has changed
 // stateChanged$$ :: String -> Observable
 export const stateChanged$$ = stateId => {
-  return Rx.Observable.fromEvent(global.document, 'zensaCheckoutState:change')
+  return Rx.Observable.fromEvent(window.document, 'zensaCheckoutState:change')
     .map(e => e.detail)
     .filter(state => R.compose(R.head, R.keys)(state) === stateId)
     .distinctUntilChanged()

@@ -1,3 +1,3 @@
-import App from './client/main'
+import App from './client/App'
 
 module.exports = App

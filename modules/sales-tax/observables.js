@@ -4,7 +4,7 @@ import axios from 'axios'
 import {FULFILLMENT_CENTER_ADDRESS} from '../global/constants'
 import config from '../../client-config'
 
-export const calcSalesTax$$ = (shippingAddress, amount, shippingRate, taxLineItems) => {
+export const calcSalesTax$$ = (shippingAddress, amount, shippingRate) => {
   const {
     line1: from_street,
     city: from_city,
@@ -44,9 +44,7 @@ export const calcSalesTax$$ = (shippingAddress, amount, shippingRate, taxLineIte
     to_street,
     amount,
     shipping: shippingRate,
-    line_items: taxLineItems,
   }
 
   return Rx.Observable.fromPromise(axios.post(`${config.apiBase}/api/sales-tax`, payload))
-    .map(taxRes => taxRes.data.tax)
 }

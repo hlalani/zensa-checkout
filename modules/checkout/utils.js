@@ -9,9 +9,11 @@ import {
   REFERRED_CREDIT_RATE,
   SAMPLE_PACK_SKU,
   XERO_ACCOUNT_CODES,
+  XERO_USD_TO_CAD_EXCHANGE_RATE,
+  GRAMS_TO_POUNDS,
 } from '../global/constants'
 import {changeState} from '../state/events'
-import {resetState} from '../state/core'
+import {getElemState, resetState} from '../state/core'
 import {
   EMAIL_FIELD_ID,
   SHIPPING_ADDRESS_NAME_FIELD_ID,
@@ -27,7 +29,13 @@ import {
   BILLING_ADDRESS_STATE_FIELD_ID,
   BILLING_ADDRESS_COUNTRY_FIELD_ID,
   PHONE_FIELD_ID,
+  ADDRESS_TOGGLE_ID,
+  SHIPPING_METHOD_ID,
   PAY_BUTTON_ID,
+  PAYMENT_TERM_FIELD_ID,
+  PAYMENT_METHOD_ID,
+  SAME_SHIPPING_BILLING_CHECKBOX_ID,
+  SALES_TAX_ID,
 } from '../state/constants'
 import {
   getProfessionalUserByReferralCodeFromDB$$,
@@ -52,6 +60,7 @@ import {hidePageLoading, showPageLoadingSuccess, hidePageLoadingSuccess} from '.
 import {getLineItems} from '../orders/core'
 import {convertToTaxLineItems} from '../sales-tax/core'
 import {calcSalesTax$$} from '../sales-tax/observables'
+import availableCountries from '../locale/available-countries.json'
 
 /**
  * GENERAL UTILITY FUNCTIONS
@@ -445,14 +454,19 @@ export const getShippingRate = (props, shippingMethod) => {
   }
 }
 
-export const getTotal = (props, formData) => {
-  const {salesTax, shippingMethod} = formData
+export const getTotalBeforeTax = (props, formData) => {
+  const {shippingMethod} = formData
   const subtotal = getSubtotal(props)
   const shippingRate = getShippingRate(props, shippingMethod)
   const discount = getDiscount(props)
   const subtotalAfterDiscount = subtotal - discount
   const referralCredit = getReferralCredit(props, subtotalAfterDiscount)
-  return subtotal + shippingRate + salesTax - discount - referralCredit
+  return subtotal + shippingRate - discount - referralCredit
+}
+
+export const getTotal = (props, formData) => {
+  const {salesTax} = formData
+  return getTotalBeforeTax(props, formData) + salesTax
 }
 
 export const getFullAddressFromStateValues = (addressStateValues) => {
@@ -475,14 +489,17 @@ export const getStateFromFullAddress$$ = (fullAddress) => {
 }
 
 export const getSalesTax$$ = (props, formData, shippingRate) => {
-  const {cartItems, productDetails} = props
   const {shippingAddress} = formData
   const isFreeSample = checkIsFreeSample(props)
   const isPro = checkIsPro(props)
-  const subtotal = getSubtotal(props)
-  const lineItems = getLineItems(productDetails, cartItems)
-  const taxLineItems = convertToTaxLineItems(props, isFreeSample, isPro, lineItems)
-  return calcSalesTax$$(shippingAddress, subtotal, shippingRate, taxLineItems)
+  const totalBeforeTax = getTotalBeforeTax(props, formData)
+  if (totalBeforeTax === 0) { return Rx.Observable.just({amount_to_collect: 0}) }
+
+  // const {cartItems, productDetails} = props
+  // const lineItems = getLineItems(productDetails, cartItems)
+  // const taxLineItems = convertToTaxLineItems(props, isFreeSample, isPro, lineItems)
+  return calcSalesTax$$(shippingAddress, totalBeforeTax, shippingRate)
+    .map(res => res.data)
 }
 
 export const handleReferral = (props, formData) => {
@@ -567,7 +584,8 @@ export const createShippingLabels = (props, formData, orderObj) => {
   getShippingBoxes$$(shippingBoxesPayload)
     .flatMap(packagesRes => {
       const parcels = R.map(parcel => {
-        const {box, total_weight: weight} = parcel
+        const {box, total_weight: weightInGrams} = parcel
+        const weight = Math.round((weightInGrams * GRAMS_TO_POUNDS) * 10000) / 10000 // max is 4 decimal places
         const {
           length,
           width,
@@ -605,28 +623,37 @@ export const createShippingLabels = (props, formData, orderObj) => {
  * Returns Observable with created Xero invoice obj as a response
  */
 export const processXero$$ = (props, formData, orderObj) => {
-  const {userProfile} = props
+  const {userProfile, locale} = props
+  const {currency} = locale
   const isPro = !R.isNil(userProfile)
   const {metadata: userProfileMetadata} = userProfile || {}
   const {fname, lname, businessName} = userProfileMetadata || {}
-  const {email, shippingAddress, phone, shippingMethod, paymentTerm} = formData
+  const {email, shippingAddress, phone, shippingMethod, paymentTerm, paymentMethod, salesTax} = formData
+  const totalBeforeTax = getTotalBeforeTax(props, formData)
   const total = getTotal(props, formData)
+  const salesTaxRate = Math.round(salesTax / totalBeforeTax * 10000) / 10000
   const {lineItems} = orderObj
   const {
+    name,
     line1,
     city,
     state,
     zip,
     country,
   } = shippingAddress
-  const xeroName = convertToXeroName(businessName, email)
+  const xeroName = isPro ? convertToXeroName(businessName, email) : convertToXeroName(name, email)
   const shippingRate = getShippingRate(props, shippingMethod)
   const isFreeSample = checkIsFreeSample(props)
   const hasPaymentTerm = paymentTerm !== 0
+  const isManualPayment = paymentMethod === 'manual'
   const dueDate = hasPaymentTerm ?
     moment().add(paymentTerm, 'day').toDate().toISOString().split("T")[0] :
     moment().toDate().toISOString().split("T")[0]
-  const {sales: salesAccountCode} = XERO_ACCOUNT_CODES
+  const {
+    sales: salesAccountCode,
+    cashCad: cadCashAccountCode,
+    cashUsd: usdCashAccountCode,
+  } = XERO_ACCOUNT_CODES
 
   /**
    * 1) Create/update Xero customer
@@ -642,22 +669,24 @@ export const processXero$$ = (props, formData, orderObj) => {
     EmailAddress: email,
     Addresses: [
       {
+        AddressType: 'STREET',
         AddressLine1: line1,
         City: city,
         Region: state,
         PostalCode: zip,
         Country: country,
-      }
+      },
     ],
     Phones: [
       {
+        PhoneType: 'DEFAULT',
         PhoneNumber: phone,
       }
     ]
   }
   return createOrUpdateXeroContact$$(contact)
     .flatMap((newContactRes) => {
-      const xeroLineItems = convertToXeroLineItems(props, isFreeSample, isPro, lineItems, shippingRate)
+      const xeroLineItems = convertToXeroLineItems(props, isFreeSample, isPro, lineItems, shippingRate, salesTaxRate)
       const invoice = {
         Type: 'ACCREC',
         Status: 'AUTHORISED',
@@ -666,40 +695,39 @@ export const processXero$$ = (props, formData, orderObj) => {
         },
         DueDate: dueDate,
         LineItems: xeroLineItems,
+        CurrencyCode: currency.toUpperCase(),
       }
       return createXeroInvoice$$(invoice)
     })
     .flatMap((newInvoiceRes) => {
       /**
-       * Defer payment if there's a payment term - and return invoice obj
+       * Defer payment if there's a payment term or manual payment - and return invoice obj
        */
-      if (hasPaymentTerm) {
+      if (hasPaymentTerm || isManualPayment) {
         return Rx.Observable.return(newInvoiceRes)
       } else {
-        // TODO: handle currencyRate for Xero
-
-        const invoiceId = R.prop('InvoiceID', newInvoiceRes)
+        const {
+          InvoiceID: invoiceId,
+          AmountDue: amountDue,
+          CurrencyCode: currencyCode,
+          CurrencyRate: currencyRate,
+        } = newInvoiceRes
         const payment = {
           Invoice: {
             InvoiceID: invoiceId,
           },
           Account: {
-            Code: salesAccountCode,
+            Code: currency === 'usd' ? usdCashAccountCode : cadCashAccountCode,
           },
           Date: new Date().toISOString().split("T")[0],
-          Amount: (total / 100).toFixed(2).toString(), // Xero requires amount in dollars as String
-          // CurrencyRate: '',
+          Amount: amountDue,
+          CurrencyCode: currencyCode,
+          CurrencyRate: currencyRate,
         }
         return createXeroPayment$$(payment)
-          .flatMap((res) => {
-            // If payment is successfully created, update invoice to PAID
-            // Returns updated invoice
-            return updateXeroInvoice$$(invoiceId, {Status: 'PAID'})
-          })
       }
     })
 }
-
 
 export const resetAllFields = (props) => {
   console.log('resetting fields')
@@ -719,19 +747,185 @@ export const resetAllFields = (props) => {
     BILLING_ADDRESS_STATE_FIELD_ID,
     BILLING_ADDRESS_COUNTRY_FIELD_ID,
     PHONE_FIELD_ID,
+    PAYMENT_TERM_FIELD_ID,
   ]
   R.forEach(fieldStateId => resetState(rootState, fieldStateId))(allFieldStateIds)
 
-  // // Also set same shipping and billing address checkbox to false
-  // changeState(SAME_SHIPPING_BILLING_CHECKBOX_ID, {checked: false})
+  changeState(SAME_SHIPPING_BILLING_CHECKBOX_ID, {checked: true})
+  changeState(PAYMENT_METHOD_ID, {value: 'cc'})
 }
 
-export const runFinalCleanup = () => {
+export const runFinalCleanup = (props) => {
   console.log('Running final cleanup')
+  resetAllFields(props)
+  initFields(props)
+
   showPageLoadingSuccess()
   setTimeout(() => {
     changeState(PAY_BUTTON_ID, {disabled: false})
     hidePageLoading()
     hidePageLoadingSuccess()
   }, 2500)
+}
+
+export const getShippingStateIds = () => {
+  return [
+    SHIPPING_ADDRESS_NAME_FIELD_ID,
+    SHIPPING_ADDRESS_LINE1_FIELD_ID,
+    SHIPPING_ADDRESS_ZIP_FIELD_ID,
+    SHIPPING_ADDRESS_CITY_FIELD_ID,
+  ]
+}
+
+export const getBillingStateIds = () => {
+  return [
+    BILLING_ADDRESS_NAME_FIELD_ID,
+    BILLING_ADDRESS_LINE1_FIELD_ID,
+    BILLING_ADDRESS_ZIP_FIELD_ID,
+    BILLING_ADDRESS_CITY_FIELD_ID,
+  ]
+}
+
+export const copyShippingToBilling = (props) => {
+  // Copy on: same shipping and billing checkbox click
+  const {rootState} = props
+  const shippingStateIds = getShippingStateIds()
+  const billingStateIds = getBillingStateIds()
+
+  const forEachIndexed = R.addIndex(R.forEach)
+  forEachIndexed((shippingStateId, i) => {
+    const billingStateId = billingStateIds[i]
+    const shippingValue = R.prop('value', getElemState(rootState, shippingStateId))
+    const billingValue = R.prop('value', getElemState(rootState, billingStateId))
+
+    // only copy if the billing value is empty and set valid/touched state too
+    if (R.isEmpty(billingValue) || R.isNil(billingValue)) {
+      changeState(billingStateId, {value: shippingValue, valid: true, touched: true})
+    }
+  },shippingStateIds)
+}
+
+// Initialize both sync and async fields once ready is set to true
+export const initFields = (props) => {
+  // Initialize states
+  const {countryCode, updateBilling, userProfile, shippingDetails} = props
+  changeState(SHIPPING_ADDRESS_COUNTRY_FIELD_ID, {value: countryCode, label: R.prop(countryCode, availableCountries)})
+  changeState(BILLING_ADDRESS_COUNTRY_FIELD_ID, {value: countryCode, label: R.prop(countryCode, availableCountries)})
+  changeState(ADDRESS_TOGGLE_ID, {value: 'shipping'})
+  changeState(PAYMENT_METHOD_ID, {value: 'cc'})
+  changeState(PAYMENT_TERM_FIELD_ID, {value: 0})
+  if (updateBilling) {
+    changeState(SAME_SHIPPING_BILLING_CHECKBOX_ID, {value: false})
+    copyShippingToBilling(props)
+  } else {
+    changeState(SAME_SHIPPING_BILLING_CHECKBOX_ID, {value: true})
+  }
+
+  // Initialize shippingMethod
+  const shippingOptions = getShippingOptions(props)
+  const shippingMethod = R.path([0, 'name'], shippingOptions)
+  changeState(SHIPPING_METHOD_ID, {value: shippingMethod})
+
+  // Initialize sales tax based on shipping address if prefilled
+  // If not prefilled, set it to 0 for now and update when shipping address is filled in, calculate it
+  const {prefill} = props
+  const {customer} = props
+  const isExistingCustomer = checkIsExistingCustomer(props)
+  if (isExistingCustomer) {
+    changeState(PAY_BUTTON_ID, {disabled: true})
+    const {shipping} = customer
+    const {address: customerShippingAddress} = shipping
+    const shippingRate = getShippingRate(props, shippingMethod)
+    const taxShippingData = {shippingAddress: customerShippingAddress}
+    getSalesTax$$(props, taxShippingData, shippingRate).subscribe(
+      taxObj => {
+        const {amount_to_collect} = taxObj
+        changeState(SALES_TAX_ID, {value: Math.round(amount_to_collect)})
+        changeState(PAY_BUTTON_ID, {disabled: false})
+      },
+      err => {
+        console.log('Something went wrong while retrieving sales tax', err)
+        changeState(PAY_BUTTON_ID, {disabled: false})
+      }
+    )
+  } else if (!R.isEmpty(prefill)) {
+    changeState(PAY_BUTTON_ID, {disabled: true})
+    const prefillObj = R.reduce((prev, {stateId, value}) => {
+      return R.merge(prev, {[stateId]: value})
+    }, {})(prefill)
+    const customerShippingAddress = {
+      line1: R.prop(SHIPPING_ADDRESS_LINE1_FIELD_ID, prefillObj),
+      city: R.prop(SHIPPING_ADDRESS_CITY_FIELD_ID, prefillObj),
+      zip: R.prop(SHIPPING_ADDRESS_ZIP_FIELD_ID, prefillObj),
+      state: R.prop(SHIPPING_ADDRESS_STATE_FIELD_ID, prefillObj),
+      country: countryCode,
+    }
+    const shippingRate = getShippingRate(props, shippingMethod)
+    const taxShippingData = {shippingAddress: customerShippingAddress}
+    getSalesTax$$(props, taxShippingData, shippingRate).subscribe(
+      taxObj => {
+        const {amount_to_collect} = taxObj
+        changeState(SALES_TAX_ID, {value: Math.round(amount_to_collect)})
+        changeState(PAY_BUTTON_ID, {disabled: false})
+      },
+      err => {
+        console.log('Something went wrong while retrieving sales tax', err)
+        changeState(PAY_BUTTON_ID, {disabled: false})
+      }
+    )
+  } else {
+    changeState(SALES_TAX_ID, {value: 0})
+  }
+
+  // Prefill fields for existing customers
+  if (isExistingCustomer) {
+    const {email, id: customerId, shipping, sources} = customer
+    const {name: shippingName, phone, address: customerShippingAddress} = shipping
+    const {
+      city: shippingAddressCity,
+      line1: shippingAddressLine1,
+      postal_code: shippingAddressZip,
+    } = customerShippingAddress
+    const customerBillingAdress = R.compose(R.head, R.prop('data'))(sources)
+    const {
+      name: billingName,
+      address_city: billingAddressCity,
+      address_line1: billingAddressLine1,
+      address_zip: billingAddressZip,
+    } = customerBillingAdress
+    const name = R.defaultTo(billingName, shippingName)
+    changeState(SAME_SHIPPING_BILLING_CHECKBOX_ID, {value: false})
+    changeState(EMAIL_FIELD_ID, {value: email, valid: true, touched: true})
+    changeState(SHIPPING_ADDRESS_NAME_FIELD_ID, {value: name, valid: true, touched: true})
+    changeState(SHIPPING_ADDRESS_LINE1_FIELD_ID, {value: shippingAddressLine1, valid: true, touched: true})
+    changeState(SHIPPING_ADDRESS_ZIP_FIELD_ID, {value: shippingAddressZip, valid: true, touched: true})
+    changeState(SHIPPING_ADDRESS_CITY_FIELD_ID, {value: shippingAddressCity, valid: true, touched: true})
+    changeState(BILLING_ADDRESS_NAME_FIELD_ID, {value: name, valid: true, touched: true})
+    changeState(BILLING_ADDRESS_LINE1_FIELD_ID, {value: billingAddressLine1, valid: true, touched: true})
+    changeState(BILLING_ADDRESS_ZIP_FIELD_ID, {value: billingAddressZip, valid: true, touched: true})
+    changeState(BILLING_ADDRESS_CITY_FIELD_ID, {value: billingAddressCity, valid: true, touched: true})
+    changeState(PHONE_FIELD_ID, {value: phone, valid: true, touched: true})
+  }
+
+  // Prefill fields with given values and set it to valid+touched (i.e. assume all prefill values are valid)
+  // Comes after existing customer prefill - prefill prop should be able to override it
+  R.forEach(({stateId, value}) => {
+    changeState(stateId, {value, valid: true, touched: true})
+  })(prefill)
+
+  // Initialize labels and error messages (for required validator only since by default it'll be empty)
+  changeState(EMAIL_FIELD_ID, {label: 'Email', error: 'Please fill out the email'})
+  changeState(SHIPPING_ADDRESS_NAME_FIELD_ID, {label: 'Name', error: 'Please fill out the name'})
+  changeState(SHIPPING_ADDRESS_LINE1_FIELD_ID, {label: 'Address', error: 'Please fill out the street address'})
+  changeState(SHIPPING_ADDRESS_ZIP_FIELD_ID, {error: 'Please fill out the postcode'})
+  changeState(SHIPPING_ADDRESS_CITY_FIELD_ID, {error: 'Please fill out the city'})
+  changeState(SHIPPING_ADDRESS_COUNTRY_FIELD_ID, {error: 'Please fill out the country'})
+  changeState(BILLING_ADDRESS_NAME_FIELD_ID, {label: 'Name', error: 'Please fill out the name (in billing address)'})
+  changeState(BILLING_ADDRESS_LINE1_FIELD_ID, {label: 'Address', error: 'Please fill out the street address'})
+  changeState(BILLING_ADDRESS_ZIP_FIELD_ID, {error: 'Please fill out the postcode'})
+  changeState(BILLING_ADDRESS_CITY_FIELD_ID, {error: 'Please fill out the city'})
+  changeState(BILLING_ADDRESS_COUNTRY_FIELD_ID, {error: 'Please fill out the country'})
+  changeState(PHONE_FIELD_ID, {label: 'Phone', error: 'Please fill out the phone'})
+  changeState(SHIPPING_METHOD_ID, {label: 'Shipping'})
+  changeState(PAYMENT_TERM_FIELD_ID, {label: 'Pay Term', error: 'Please fill out the payment term'})
 }

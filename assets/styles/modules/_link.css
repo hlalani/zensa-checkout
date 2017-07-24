@@ -1,0 +1,9 @@
+.link-purplish {
+  color: var(--purplish);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.link-purplish:hover {
+  color: var(--dark-purplish);
+}

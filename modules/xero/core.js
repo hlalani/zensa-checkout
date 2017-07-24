@@ -7,13 +7,16 @@ import {
   getProfessionalUnitDiscount,
   getRetailDiscountRate,
 } from '../checkout/utils'
-import {checkIsPharmaLineItem} from '../orders/core'
+import {
+  checkIsPharmaLineItem,
+  checkIsSampleSachet,
+} from '../orders/core'
 
 export const convertToXeroName = (businessName, email) => {
   return `${businessName} (${email})`
 }
 
-export const convertToXeroLineItems = (props, isFreeSample, isPro, lineItems, shippingRate) => {
+export const convertToXeroLineItems = (props, isFreeSample, isPro, lineItems, shippingRate, salesTaxRate) => {
   const {productDetails, locale} = props
   const {currency} = locale
   const {sales: salesAccountCode} = XERO_ACCOUNT_CODES
@@ -29,16 +32,18 @@ export const convertToXeroLineItems = (props, isFreeSample, isPro, lineItems, sh
     const proUnitPrice = originalPrice - proUnitDiscount
 
     // Calculate the retail unit price using retail volume discount
-    const retailUnitDiscount = getRetailDiscountRate(quantity) * originalPrice
+    const retailUnitDiscount = (getRetailDiscountRate(quantity) / 100) * originalPrice
     const retailUnitPrice = originalPrice - retailUnitDiscount
 
     const unitPrice = isPro ? proUnitPrice : retailUnitPrice
 
+    const isSampleSachet = checkIsSampleSachet(item)
+
     /**
-     * If the order is a free sample OR the line item is NOT a pharma item, return 1 cent (not 0)
+     * If the order is a free sample OR the line item is NOT a pharma item OR it's a sample sachet, return 1 cent (not 0)
      * Otherwise, return the unitPrice
      */
-    const finalUnitPrice = isFreeSample || !checkIsPharmaLineItem(item) ? 1 : unitPrice
+    const finalUnitPrice = isFreeSample || !checkIsPharmaLineItem(item) || isSampleSachet ? 1 : unitPrice
 
     // Xero requires amount in dollars in Float, not cents in Integer
     return {
@@ -47,6 +52,7 @@ export const convertToXeroLineItems = (props, isFreeSample, isPro, lineItems, sh
       Quantity: quantity,
       Name: name,
       UnitAmount: Math.round(finalUnitPrice) / 100,
+      TaxAmount: Math.round(finalUnitPrice * quantity * salesTaxRate) / 100,
       Description: name,
     }
   }, lineItems)
@@ -61,6 +67,7 @@ export const convertToXeroLineItems = (props, isFreeSample, isPro, lineItems, sh
     Quantity: 1,
     Name: 'Shipping',
     UnitAmount: Math.round(finalShippingRate) / 100,
+    TaxAmount: Math.round(finalShippingRate * salesTaxRate) / 100,
     Description: 'Shipping',
   })(xeroLineItems)
 }

@@ -1,5 +1,8 @@
 import R from 'ramda'
-import {PHARMA_LINE_ITEMS} from '../global/constants'
+import {
+  PHARMA_LINE_ITEMS,
+  HEALING_CREAM_5ML_SAMPLE_SKU,
+} from '../global/constants'
 
 /*
   NOTES:
@@ -87,4 +90,9 @@ export const createOrder = (productDetails, cartItems, customer, shipping, shipp
 
 export const checkIsPharmaLineItem = (lineItem) => {
   return R.contains(lineItem.sku, PHARMA_LINE_ITEMS)
+}
+
+export const checkIsSampleSachet = (lineItem) => {
+  const {sku} = lineItem
+  return sku === HEALING_CREAM_5ML_SAMPLE_SKU
 }

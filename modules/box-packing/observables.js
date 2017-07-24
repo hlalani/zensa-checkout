@@ -7,6 +7,7 @@ import Rx from 'rx-lite'
     lineItemsWithDimensions: [
       {
         sku,
+        quantity,
         width,
         height,
         length,

@@ -14,6 +14,7 @@ export const createScheduledCharge = (scheduledChargeObj) => {
         invoiceId
         amount
         currency
+        currencyRate
       }
     }
   `
@@ -27,8 +28,8 @@ export const createScheduledCharge = (scheduledChargeObj) => {
 
 export const updateScheduledCharge = (email, scheduledChargeObj) => {
   const query = `
-    mutation SaveScheduledCharge($email: String, $input: ScheduledChargeInput!) {
-      saveScheduledCharge(email: $email, input: $input) {
+    mutation UpdateScheduledCharge($email: String, $input: ScheduledChargeInput!) {
+      updateScheduledCharge(email: $email, input: $input) {
         email
         customerId
         chargeOn
@@ -38,6 +39,7 @@ export const updateScheduledCharge = (email, scheduledChargeObj) => {
         invoiceId
         amount
         currency
+        currencyRate
       }
     }
   `
@@ -62,6 +64,7 @@ export const getScheduledCharges = () => {
       invoiceId
       amount
       currency
+      currencyRate
     }
   `
   return axios.post(`${config.apiBase}/graphql`, {

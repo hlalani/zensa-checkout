@@ -14,9 +14,11 @@ import {changeState} from '../state/events'
 import {getElemState} from '../state/core'
 import {
   OUTCOME_MESSAGE_ID,
+  PAY_BUTTON_ID,
 } from '../state/constants'
 import {
   checkIsExistingCustomer,
+  checkIsFreeSample,
   getCartItemsWithDetail,
   getProductContent,
   getTotalQuantity,
@@ -43,7 +45,7 @@ import {createScheduledCharge} from '../scheduled-charges/graphql'
 import {hidePageLoading} from '../page-loading/core'
 
 /**
- * 1) If updateBilling === true, run updateBilling().
+ * 1) If updateBilling === true, run updateBillingInfo().
  *    handleStripeOutcome() will run handleCreateCustomerStripeTokenSuccess()
  * 2) If updateBilling !== true, then see if billing already exists (i.e. customer !== nil).
  *    a) If billing already exists, don't show payment form. Run chargeExistingPro().
@@ -62,7 +64,7 @@ function handleRetailStripeTokenSuccess(token, props, formData) {
   const shippingOptions = getShippingOptions(props)
   const cartItemsWithDetail = getCartItemsWithDetail(props)
   const {currency} = locale
-  const {email, billingAddress, shippingAddress, phone, shippingMethod} = formData
+  const {email, billingAddress, shippingAddress, phone, shippingMethod, salesTax} = formData
   const shippingRate = getShippingRate(props, shippingMethod)
   const total = getTotal(props, formData)
   const {
@@ -89,6 +91,7 @@ function handleRetailStripeTokenSuccess(token, props, formData) {
     business_name: 'N/A',
     shipping_method: getShippingMethodTitle(shippingOptions, shippingMethod),
     shipping_price: shippingRate / 100,
+    sales_tax: salesTax / 100,
     products: getProductContent(cartItemsWithDetail),
     quantity: getTotalQuantity(cartItemsWithDetail),
     professional_free_sample: false,
@@ -117,7 +120,7 @@ function handleRetailStripeTokenSuccess(token, props, formData) {
 function handleRetailChargeSuccess(props, formData, chargeData) {
   const {receipt_email: email, metadata: chargeMetadata, amount} = chargeData
   const {name, phone, business_name, line1, postal_code, city, state, country, shipping_method} = chargeMetadata
-  const {onChargeSuccess, track, locale, cartItems, productDetails, addToEmailList = true, rootState} = props
+  const {isPos, onRetailChargeSuccess, track, locale, cartItems, productDetails, addToEmailList = true, rootState} = props
   const cartItemsWithDetail = getCartItemsWithDetail(props)
   const {currency} = locale
 
@@ -130,7 +133,7 @@ function handleRetailChargeSuccess(props, formData, chargeData) {
       email_address: email,
       status: 'subscribed',
     }
-    subscribeNewMember$$(MAILCHIMP_LOYALTY_LIST_ID, payload).subscribe(
+    subscribeNewMember$$(MAILCHIMP_LOYALTY_LIST_ID, mailchimpPayload).subscribe(
       res => console.log('MailChimp subscribe successful! ', res),
       err => console.log('Error while subscribing to MailChimp: ', err)
     )
@@ -195,14 +198,16 @@ function handleRetailChargeSuccess(props, formData, chargeData) {
   // resetAllFields(props)
 
   // Handle post charge clean up
-  onChargeSuccess(rootState, chargeData)
+  onRetailChargeSuccess(isPos, rootState, chargeData)
 
   // Re-enable the button, show success icon, disable page loading
-  runFinalCleanup()
+  runFinalCleanup(props)
 }
 
 /**
  * PRO
+ * NOTE: Handles both new and existing customer charges
+ *       Existing customers simply skip the customer creation process in the backend
  */
 
 function handleProStripeTokenSuccess(token, props, formData) {
@@ -213,7 +218,7 @@ function handleProStripeTokenSuccess(token, props, formData) {
   const {metadata: userProfileMetadata} = userProfile
   const {businessName} = userProfileMetadata
   const {currency} = locale
-  const {email, billingAddress, shippingAddress, phone, shippingMethod} = formData
+  const {email, billingAddress, shippingAddress, phone, shippingMethod, salesTax} = formData
   const shippingRate = getShippingRate(props, shippingMethod)
   const total = getTotal(props, formData)
   const {
@@ -240,6 +245,7 @@ function handleProStripeTokenSuccess(token, props, formData) {
     business_name: businessName,
     shipping_method: getShippingMethodTitle(shippingOptions, shippingMethod),
     shipping_price: shippingRate / 100,
+    sales_tax: salesTax / 100,
     products: getProductContent(cartItemsWithDetail),
     quantity: getTotalQuantity(cartItemsWithDetail),
     professional_free_sample: false,
@@ -270,7 +276,7 @@ function handleProChargeSuccess(props, formData, chargeData) {
   const {name, phone, business_name, line1, postal_code, city, state, country, shipping_method} = chargeMetadata
   const {
     isPos,
-    onChargeSuccess,
+    onProChargeSuccess,
     track,
     locale,
     cartItems,
@@ -377,10 +383,10 @@ function handleProChargeSuccess(props, formData, chargeData) {
   // resetAllFields(props)
 
   // Handle post charge clean up
-  onChargeSuccess(rootState, chargeData)
+  onProChargeSuccess(isPos, rootState, chargeData)
 
   // Re-enable the button, show success icon, disable page loading
-  runFinalCleanup()
+  runFinalCleanup(props)
 }
 
 /**
@@ -434,11 +440,14 @@ function handleCreateCustomerStripeTokenSuccess(token, props, formData) {
 function handleCreateCustomerSuccess(props, formData, customerObj) {
   const {
     isPos,
+    rootState,
     locale,
     addToEmailList,
     customer,
     userProfile,
     track,
+    productDetails,
+    cartItems,
     onCreateCustomerSuccess,
     onScheduledChargeSuccess,
   } = props
@@ -448,38 +457,14 @@ function handleCreateCustomerSuccess(props, formData, customerObj) {
   const {name, phone} = customerMetadata
   const {email, metadata: userProfileMetadata} = userProfile
   const {businessName, fname, lname} = userProfileMetadata
-  const {new: isNewCustomer} = customerMetadata
   const {shippingAddress, paymentTerm, shippingMethod} = formData
   const {line1, zip, city, state, country} = shippingAddress
   const isScheduledCharge = !R.equals(paymentTerm, 0) && !R.isNil(paymentTerm)
 
-  // Track and send email if it's a new customer
-  if (isNewCustomer && !isScheduledCharge) {
-    // track
-    track.professionalAddBilling()
-
-    // send email to notify of signup for possible follow up
-    const fromEmail = {email: SUPPORT_EMAIL}
-    const toEmailArray = R.map(email => { return {email}})(PROFESSIONAL_ADD_BILLING_NOTIFICATION_EMAILS)
-    const subject = `[PROFESSIONAL ADDED BILLING INFO] ${name} (${email})`
-    const content = `${name} (${email}) just added billing information in Zensa Professional portal`
-    const payload = {
-      toEmailArray,
-      fromEmail,
-      subject,
-      content
-    }
-
-    sendEmail$$(payload).subscribe(
-      res => console.log('Email successfully sent', res),
-      err => console.log('Something went wrong while sending professional add billing notification email: ', err)
-    )
-  }
-
   /**
    * If this is a scheduled charge:
    *    1) Handle referral
-   *    2) Add to MailChimp Buyer list
+   *    2) Send order email to fulfillment
    *    3) Save order to DB
    *    4) Create shipment
    *    5) Process Xero
@@ -490,39 +475,8 @@ function handleCreateCustomerSuccess(props, formData, customerObj) {
    * Otherwise, just run onCreateCustomerSuccess()
    */
   if (isScheduledCharge) {
-    // Track
-    track.professionalPurchase(email, currency, cartItemsWithDetail)
-
     // Handle referral business
     handleReferral(props, formData)
-
-    // Subscribe the user to the email list (MailChimp) if they opted in
-    // Don't run if customer already exists (since they're already in the buyer list)
-    // For now, only add to email list if not POS
-    if (addToEmailList && R.isNil(customer) && !isPos) {
-      const {businessName, fname, lname} = userProfileMetadata || {}
-      const mailchimpPayload = {
-        email_address: email,
-        status: 'subscribed',
-        merge_fields: {
-          'FNAME': fname,
-          'LNAME': lname,
-          'BNAME': businessName,
-        },
-      }
-      subscribeNewMember$$(MAILCHIMP_PROFESSIONAL_BUYER_LIST_ID, mailchimpPayload)
-        .flatMap(res => {
-          console.log('MailChimp subscribe to professional buyer list successful! ', res)
-          return Rx.Observable.zip(
-            deleteMember$$(MAILCHIMP_PROFESSIONAL_FREE_SAMPLE_LIST_ID, email),
-            deleteMember$$(MAILCHIMP_LOYALTY_LIST_ID, email)
-          )
-        })
-        .subscribe(
-          res => console.log('MailChimp remove from free sample and loyalty list successful! ', res),
-          err => console.log('Error while subscribing to MailChimp professional buyer list: ', err)
-        )
-    }
 
     // Save order to DB
     const customerInfo = {
@@ -548,9 +502,14 @@ function handleCreateCustomerSuccess(props, formData, customerObj) {
     processXero$$(props, formData, orderObj).subscribe(
       invoiceObj => {
         // Create the scheduled charge obj and save to DB
-        const {InvoiceId: invoiceId} = invoiceObj
-        const total = getTotal(props, formData)
-        const chargeDate = moment().add(parseInt(paymentTerm), 'days').valueOf().toString()
+        const {InvoiceID: invoiceId, AmountDue: amountDue, CurrencyRate: currencyRate} = invoiceObj
+
+        // NOTE: On dev env, scheduled charge will be set to 1 sec later
+        const chargeDate = __ENV__ === 'production' ?
+          moment().add(parseInt(paymentTerm), 'days').valueOf().toString() :
+          moment().add(1, 'seconds').valueOf().toString()
+        const amount = Math.round(parseFloat(amountDue) * 100)
+
         const scheduledChargePayload = {
           email,
           customerId,
@@ -558,50 +517,46 @@ function handleCreateCustomerSuccess(props, formData, customerObj) {
           chargeAttempted: false,
           charged: false,
           invoiceId,
-          amount: total,
+          amount,
           currency,
+          currencyRate: parseFloat(currencyRate),
         }
+        // In dev env, this will use test_scheduled_charges table
         createScheduledCharge(scheduledChargePayload)
           .then(res => {
             console.log('Saved scheduled charge successfully', res)
-
-            // track
-            track.professionalChargeScheduled()
 
             // Send email to notify
             const fromEmail = {email: SUPPORT_EMAIL}
             const toEmailArray = R.map(thisEmail => { return {email: thisEmail}})(ORDER_EMAILS)
             const subject = `[PRO CHARGE SCHEDULED] ${name} (${email})`
-            const content = `Pro charge successfully scheduled for ${name} (${email})`
+            const content = `Pro charge successfully scheduled for ${name} (${email}) in the amount of ${amount} (${currency.toUpperCase()})`
             const payload = {
               toEmailArray,
               fromEmail,
               subject,
               content
             }
-            sendEmail$$(payload).subscribe(
-              res => console.log('Email successfully sent', res),
-              err => console.log('Something went wrong while sending pro charge scheduled email: ', err)
-            )
+            sendOrderEmail(payload)
           })
           .catch(err => {
             console.log('Something went wrong while saving scheduled charge', err)
-            handleStripeError(err)
+            handleStripeError({message: 'Something went wrong while saving scheduled charge. Please try again.'})
           })
       },
       err => console.log('Something went wrong while processing Xero', err)
     )
 
     // handle post scheduled charge clean up
-    onScheduledChargeSuccess(customerObj)
+    onScheduledChargeSuccess(rootState, customerObj)
   } else {
-    // NOT a scheduled charge or new customer, so just charge
+    // NOT a scheduled charge
     // handle post create customer clean up
-    onCreateCustomerSuccess(customerObj)
+    onCreateCustomerSuccess(isPos, rootState, customerObj)
   }
 
   // Re-enable the button, show success icon, disable page loading
-  runFinalCleanup()
+  runFinalCleanup(props)
 }
 
 
@@ -616,9 +571,11 @@ export const handleStripeError = (err) => {
   if (!R.isNil(err.message)) {
     changeState(OUTCOME_MESSAGE_ID, {msg: err.message, type: 'error', visible: true})
     hidePageLoading()
+    changeState(PAY_BUTTON_ID, {disabled: false})
   } else {
     changeState(OUTCOME_MESSAGE_ID, {msg: 'Something went wrong. Please try again or contact support.', type: 'error', visible: true})
     hidePageLoading()
+    changeState(PAY_BUTTON_ID, {disabled: false})
   }
 }
 
@@ -739,10 +696,10 @@ export const chargeExistingPro = (props, formData) => {
 */
 
 /**
- * UPDATE BILLING
+ * UPDATE BILLING INFO
  */
 
-export const updateBilling = (props, formData, card) => {
+export const updateBillingInfo = (props, formData, card) => {
   const {stripe} = props
   const {email, billingAddress, shippingAddress, phone, shippingMethod} = formData
   const {
@@ -789,9 +746,8 @@ export const processSample = (props, formData) => {
    *          1) CHARGING 1 cent in Xero
    *          2) Tracking, order email, and MailChimp is different
    */
-  const {email, shippingAddress, phone, shippingMethod} = formData
-  const {name, line1, postal_code, city, state, country} = shippingAddress
-  const {isPos, locale, userProfile, productDetails, cartItems} = props
+  const {email, shippingAddress, phone, shippingMethod, salesTax} = formData
+  const {isPos, coupon, rootState, locale, userProfile, productDetails, cartItems, track, onSampleSuccess} = props
   const cartItemsWithDetail = getCartItemsWithDetail(props)
   const {currency} = locale
   const {metadata: userProfileMetadata} = userProfile
@@ -804,159 +760,88 @@ export const processSample = (props, formData) => {
     trainer,
   } = userProfileMetadata
   const {
+    name,
     line1: address_line1,
     city: address_city,
     state: address_state,
     country: address_country,
-    postal_code: address_zip,
+    zip: address_zip,
   } = shippingAddress
   const isFreeSample = checkIsFreeSample(props)
+  const {couponId = 'None'} = coupon
+  const total = getTotal(props, formData)
+  const shippingRate = getShippingRate(props, shippingMethod)
+
+  // send order email to fulfillment using Sendgrid
+  const fromEmail = {email: SUPPORT_EMAIL}
+  const toEmailArray = R.map(eachEmail => { return {email: eachEmail}})(ORDER_EMAILS)
+  const productsContent = getProductContent(cartItemsWithDetail)
+  const otherData = {
+    name,
+    professionalType,
+    quantityEst,
+    businessName,
+    trainer,
+    address_line1,
+    address_zip,
+    address_city,
+    address_country,
+    address_state,
+    phone,
+    shipping_method: shippingMethod,
+    shipping_price: shippingRate / 100,
+    sales_tax: salesTax / 100,
+    couponId,
+    products: productsContent,
+    quantity: 1,
+    professional_free_sample: true,
+  }
+  const orderDetails = R.merge({
+    email,
+    amount: total / 100,
+    currency,
+    created: moment().format('MMM Do YYYY, h:mm:ss a'),
+  }, otherData)
+  const orderDetailsPairs = R.toPairs(orderDetails) // [['key', 'value'], ['key', 'value'], ...]
+  const content = R.reduce((prev, curr) => prev + `${R.head(curr)}: ${R.last(curr)}\n\n`, '')(orderDetailsPairs)
 
   if (isFreeSample) {
-    // THIS IS FREE SAMPLE CASE
-
-    // tracking
-    track.professionalSamplePurchase(email, currency)
-
-    // send order email to fulfillment using Sendgrid
-    const toEmailArrayForSample = R.map(eachEmail => { return {email: eachEmail}})(ORDER_EMAILS)
-    const productsContent = getProductContent(cartItemsWithDetail)
-    const otherData = {
-      name,
-      professionalType,
-      quantityEst,
-      businessName,
-      trainer,
-      address_line1,
-      address_zip,
-      address_city,
-      address_country,
-      address_state,
-      phone,
-      shipping_method: 'UPS Ground or UPS International',
-      shipping_price: 0,
-      couponId: 'None',
-      products: productsContent,
-      quantity: 1,
-      professional_free_sample: true,
-    }
-    const orderDetails = R.merge({
-      email,
-      amount: 0,
-      currency,
-      created: moment().format('MMM Do YYYY, h:mm:ss a'),
-    }, otherData)
-    const orderDetailsPairs = R.toPairs(orderDetails) // [['key', 'value'], ['key', 'value'], ...]
-    const subjectForSample = `[ORDER - FREE SAMPLE] order for ${productsContent} from ${email}`
-    const contentForSample = R.reduce((prev, curr) => prev + `${R.head(curr)}: ${R.last(curr)}\n\n`, '')(orderDetailsPairs)
+    // Free sample case
+    const subject = `[ORDER - FREE SAMPLE FROM POS] order for ${productsContent} from ${email}`
 
     const orderEmailPayload = {
-      toEmailArray: toEmailArrayForSample,
+      toEmailArray: toEmailArray,
       fromEmail,
-      subject: subjectForSample,
-      content: contentForSample
+      subject: subject,
+      content: content
     }
     sendOrderEmail(orderEmailPayload)
-
-    // Subscribe the user to the email list (MailChimp) if they opted in
-    // For now, only add to email list if not POS
-    const samplePayload = {
-      email_address: email,
-      status: 'subscribed',
-      merge_fields: {
-        'FNAME': fname,
-        'LNAME': lname,
-        'BNAME': businessName,
-      }
-    }
-    if (!isPos) {
-      subscribeNewMember$$(MAILCHIMP_PROFESSIONAL_FREE_SAMPLE_LIST_ID, samplePayload)
-        .subscribe(
-          res => console.log('Adding member to MailChimp professional free sample list successful', res),
-          err => console.log('Error while subscribing to MailChimp professional free sample list: ', err)
-        )
-    }
   } else {
-    // THIS IS MANUAL CHARGE CASE
-    // NO NEED TO TRACK (BASE CRM DOES), OR EMAIL TO FULFILLMENT OR ADD TO MAILCHIMP
-    /*
-    const total = getTotal(props, formData)
-
-    // Send order email to fulfillment using Sendgrid
-    const toEmailArrayForSample = R.map(eachEmail => { return {email: eachEmail}})(ORDER_EMAILS)
-    const productsContent = getProductContent(cartItemsWithDetail)
-    const otherData = {
-      name,
-      professionalType,
-      quantityEst,
-      businessName,
-      trainer,
-      address_line1,
-      address_zip,
-      address_city,
-      address_country,
-      address_state,
-      phone,
-      shipping_method: 'UPS Ground or UPS International',
-      shipping_price: 0,
-      couponId: 'None',
-      products: productsContent,
-      quantity: 1,
-      professional_free_sample: true,
-    }
-    const orderDetails = R.merge({
-      email,
-      amount: total / 100,
-      currency,
-      created: moment().format('MMM Do YYYY, h:mm:ss a'),
-    }, otherData)
-    const orderDetailsPairs = R.toPairs(orderDetails) // [['key', 'value'], ['key', 'value'], ...]
-    const subject = `[ORDER - CHARGED MANUALLY] order for ${productsContent} from ${email} to ${city}, ${country} via ${shipping_method}`
-    const content = R.reduce((prev, curr) => prev + `${R.head(curr)}: ${R.last(curr)}\n\n`, '')(orderDetailsPairs)
+    // Manual charge case
+    const subject = `[ORDER - MANUAL CHARGE] order for ${productsContent} from ${email}`
 
     const orderEmailPayload = {
-      toEmailArray: toEmailArrayForSample,
+      toEmailArray: toEmailArray,
       fromEmail,
-      subject: subjectForSample,
-      content: contentForSample
+      subject: subject,
+      content: content
     }
-
-    sendEmail$$(orderEmailPayload).subscribe(
-      res => console.log('Pro free sample email successfully sent', res),
-      err => console.log('Something went wrong while sending pro free sample email: ', err)
-    )
-
-    // subscribe the user to the email list (MailChimp) if they opted in
-    const samplePayload = {
-      email_address: email,
-      status: 'subscribed',
-      merge_fields: {
-        'FNAME': fname,
-        'LNAME': lname,
-        'BNAME': businessName,
-      }
-    }
-    subscribeNewMember$$(MAILCHIMP_PROFESSIONAL_BUYER_LIST_ID, samplePayload)
-      .subscribe(
-        res => console.log('Adding member to MailChimp professional buyer list successful', res),
-        err => console.log('Error while subscribing to MailChimp professional free sample list: ', err)
-      )
-    */
+    sendOrderEmail(orderEmailPayload)
   }
 
   // Save order
   const customerInfo = {
     email,
     name,
-    businessName: business_name,
+    businessName,
     phone,
   }
   const shipping = {
-    address_line1: line1,
-    address_zip: zip,
-    address_city: city,
-    address_state: state,
-    address_country: country,
+    address_line1,
+    address_zip,
+    address_city,
+    address_state,
+    address_country,
   }
   const orderObj = createOrder(productDetails, cartItems, customerInfo, shipping, shippingMethod)
   saveOrder(orderObj)
@@ -969,6 +854,12 @@ export const processSample = (props, formData) => {
     invoiceObj => console.log('Processing Xero successful'),
     err => console.log('Something went wrong while processing Xero', err)
   )
+
+  // Handle post sample clean up
+  onSampleSuccess(rootState)
+
+  // Re-enable the button, show success icon, disable page loading
+  runFinalCleanup(props)
 }
 
 /**

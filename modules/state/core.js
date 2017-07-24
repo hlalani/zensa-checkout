@@ -30,3 +30,9 @@ export const resetState = R.curry((rootState, stateId) => {
   const wipedFieldState = R.mapObjIndexed((val, key) => undefined)(fieldState)
   changeState(stateId, wipedFieldState)
 })
+
+// getNextRootState :: {*} -> String -> {*}
+export const getNextRootState = R.curry((rootState, stateId, newState) => {
+  const mergedNewState = R.merge(getElemState(rootState, stateId), newState)
+  return R.merge(rootState, {[stateId]: mergedNewState})
+})
